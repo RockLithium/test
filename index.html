@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>光学实验室 - WebGL路径追踪</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #000; color: #fff; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; user-select: none; }
+        body { margin: 0; overflow: hidden; background-color: #000; color: #fff; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; user-select: none; touch-action: none; overscroll-behavior: none; }
         #joystick-zone { position: absolute; bottom: 20px; left: 20px; width: 150px; height: 150px; display: none; z-index: 10; touch-action: none; }
         #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 20px; z-index: 20; background: rgba(0,0,0,0.8); padding: 20px; border-radius: 10px;}
-        .info { position: absolute; top: 15px; left: 15px; z-index: 10; pointer-events: none; text-shadow: 1px 1px 3px black; max-width: 300px; }
+        .info { position: absolute; top: 15px; left: 15px; z-index: 10; pointer-events: none; text-shadow: 1px 1px 3px black; max-width: 380px; }
         .info h2 { margin: 0 0 10px 0; font-size: 22px; color: #4DA8DA; }
         .info p { margin: 5px 0; font-size: 14px; line-height: 1.4; color: #ddd; }
         .highlight { color: #FFD700; font-weight: bold; }
@@ -28,7 +28,6 @@
            - 手机: <span class="highlight">左下角摇杆</span> 移动, <span class="highlight">单指滑动</span> 旋转视角, <span class="highlight">双指</span> 缩放
         </p>
         <p>✨ 采样累积数: <span id="sample-count" class="highlight" style="font-size: 18px;">0</span></p>
-        <p style="color:#aaa; font-size: 12px; margin-top: 10px;">注：由于采用纯物理光线追踪，画面需要几秒钟累积光线才能看清光屏上的投影（如默认的倒立F实像），请保持画面静止。</p>
     </div>
 
     <script type="module">
@@ -53,16 +52,15 @@
         // === WebGL渲染器与相机初始化 ===
         const renderer = new THREE.WebGLRenderer({ antialias: false });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2.0));
+        // 性能优化：强制将像素比设为1.0，极大提升路径追踪在 Retina 等高分屏上的性能
+        renderer.setPixelRatio(1.0);
         document.body.appendChild(renderer.domElement);
 
         const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
         // 调整初始位置：在光源后方左侧，斜向观察光具座和光屏
-        camera.position.set(-10, 5, -22);
-        // 对准光屏方向 (默认光屏在 Z=15 的位置，看向Z=10处可以将透镜和光屏尽收眼底)
+        camera.position.set(-12, 4, -22);
         camera.lookAt(0, 0, 10);
 
-        // 自动提取初始的偏航角和俯仰角，确保鼠标拖动控制平滑过渡
         const initialEuler = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ');
         let cameraYaw = initialEuler.y;
         let cameraPitch = initialEuler.x;
@@ -178,16 +176,27 @@
                 }
             }
 
+            // 统一生成滑块和支架的函数
+            float getStand(vec3 lp, float bottomY) {
+                float poleH = max(0.0, bottomY + 5.8) * 0.5;
+                float dPole = sdBox(lp - vec3(0.0, bottomY - poleH, 0.0), vec3(0.3, poleH, 0.3));
+                float dBase = sdBox(lp - vec3(0.0, -5.8, 0.0), vec3(1.5, 0.2, 1.0));
+                return min(dPole, dBase);
+            }
+
             Hit map(vec3 p) {
                 Hit res = Hit(1e20, Material(MAT_DIFFUSE, vec3(0), vec3(0)));
 
-                float dBench = sdBox(p - vec3(0.0, -2.5, 0.0), vec3(6.0, 0.5, 25.0));
+                // 桌面下移至 Y = -6.5 避免遮挡成像
+                float dBench = sdBox(p - vec3(0.0, -6.5, 0.0), vec3(4.0, 0.5, 30.0));
                 vec3 benchCol = vec3(0.15);
-                if (abs(p.x) < 3.0 && p.y > -2.1) {
+                if (dBench < 0.1 && abs(p.x) < 3.0) {
                     if (mod(p.z, 1.0) < 0.05) benchCol = vec3(0.4);
                     if (mod(p.z, 5.0) < 0.1) benchCol = vec3(0.7);
                 }
                 res = opU(res, Hit(dBench, Material(MAT_DIFFUSE, benchCol, vec3(0))));
+
+                float dStands = 1e20;
 
                 for(int i=0; i<MAX_LIGHTS; i++) {
                     if(i >= u_numLights) break;
@@ -197,10 +206,13 @@
                         float dF2 = sdBox(lp - vec3(0.3, 1.8, 0.0), vec3(1.1, 0.2, 0.1));
                         float dF3 = sdBox(lp - vec3(0.1, 0.2, 0.0), vec3(0.9, 0.2, 0.1));
                         float dF = min(dF1, min(dF2, dF3));
-                        res = opU(res, Hit(dF, Material(MAT_EMISSIVE, vec3(0), u_lightColor[i] * 50.0)));
+                        // 修复：大幅提亮光源，以满足小孔成像苛刻的追踪概率需求
+                        res = opU(res, Hit(dF, Material(MAT_EMISSIVE, vec3(0), u_lightColor[i] * 300.0)));
+                        dStands = min(dStands, getStand(lp, -2.0)); 
                     } else if (u_lightTypes[i] == 1) { 
                         float dB = sdSphere(lp, 1.5);
-                        res = opU(res, Hit(dB, Material(MAT_EMISSIVE, vec3(0), u_lightColor[i] * 30.0)));
+                        res = opU(res, Hit(dB, Material(MAT_EMISSIVE, vec3(0), u_lightColor[i] * 300.0)));
+                        dStands = min(dStands, getStand(lp, -1.5));
                     }
                 }
 
@@ -215,17 +227,20 @@
                         float offset = sqrt(max(R*R - r*r, 0.001));
                         float d1 = sdSphere(lp - vec3(0,0, offset), R);
                         float d2 = sdSphere(lp - vec3(0,0, -offset), R);
-                        dLens = max(d1, d2);
-                        float dCyl = sdCylinderZ(lp, 2.0, r);
-                        dLens = max(dLens, dCyl);
+                        float dLens_temp = max(d1, d2);
+                        // 修复透镜厚度边界：扩大圆柱体Z轴厚度限制到5.0，防止透镜被削平
+                        float dCyl = sdCylinderZ(lp, 5.0, r);
+                        dLens = max(dLens_temp, dCyl);
                     } else if (u_lensTypes[i] == 1) {
-                        float dCyl = sdCylinderZ(lp, 0.5, r);
+                        // 修复凹透镜致命Bug：之前0.5厚度会让边缘被一刀切成平面玻璃，彻底失去发散作用
+                        float dCyl = sdCylinderZ(lp, 5.0, r);
                         float offset = R + 0.2; 
                         float d1 = sdSphere(lp - vec3(0,0, offset), R);
                         float d2 = sdSphere(lp - vec3(0,0, -offset), R);
                         dLens = max(dCyl, max(-d1, -d2));
                     }
                     res = opU(res, Hit(dLens, Material(MAT_GLASS, vec3(0.98, 0.99, 1.0), vec3(0))));
+                    dStands = min(dStands, getStand(lp, -r)); 
                 }
 
                 for(int i=0; i<MAX_SCREENS; i++) {
@@ -235,13 +250,16 @@
                         float dS = sdBox(sp, vec3(4.5, 4.5, 0.05));
                         res = opU(res, Hit(dS, Material(MAT_SCREEN, vec3(0.95), vec3(0))));
                     } else if (u_screenTypes[i] == 1) {
-                        float dBoard = sdBox(sp, vec3(4.5, 4.5, 0.05));
-                        // 使用 uniform 控制的孔径大小
+                        // 修复小孔成像：将小孔板做得极薄，防止射线穿孔时在厚壁内来回反弹阵亡
+                        float dBoard = sdBox(sp, vec3(4.5, 4.5, 0.005));
                         float dHole = sdCylinderZ(sp, 0.2, u_screenAperture[i]); 
                         float dPinhole = max(dBoard, -dHole);
                         res = opU(res, Hit(dPinhole, Material(MAT_DIFFUSE, vec3(0.2), vec3(0))));
                     }
+                    dStands = min(dStands, getStand(sp, -4.5));
                 }
+
+                res = opU(res, Hit(dStands, Material(MAT_DIFFUSE, vec3(0.25), vec3(0))));
 
                 return res;
             }
@@ -258,7 +276,6 @@
             void main() {
                 seed = uint(gl_FragCoord.x * 1973.0 + gl_FragCoord.y * 9277.0 + u_frame * 26699.0);
                 
-                // 亚像素抖动抗锯齿，极大提升边缘清晰度
                 vec2 jitter = vec2(random() - 0.5, random() - 0.5) / u_resolution;
                 vec2 ndc = (vUv + jitter) * 2.0 - 1.0;
                 
@@ -270,16 +287,22 @@
                 vec3 throughput = vec3(1.0);
                 
                 for (int bounce = 0; bounce < 5; bounce++) {
+                    if (bounce > 2) {
+                        float pAlive = max(throughput.r, max(throughput.g, throughput.b));
+                        if (random() > pAlive) break;
+                        throughput /= pAlive;
+                    }
+
                     Hit hit = Hit(1e20, Material(MAT_DIFFUSE, vec3(0), vec3(0)));
                     float t = 0.0;
                     
-                    // 修复玻璃穿透：使用绝对值距离 abs(h.d) 步进，允许光线在透明介质内部继续传播！
-                    for (int i = 0; i < 200; i++) {
+                    // 加大最大步进次数防止穿孔时光线漏算
+                    for (int i = 0; i < 150; i++) {
                         vec3 p = ro + rd * t;
                         Hit h = map(p);
                         if (abs(h.d) < 0.001) { hit = h; break; }
                         if (t > 150.0) break;
-                        t += abs(h.d) * 0.95; 
+                        t += abs(h.d) * 0.99; 
                     }
 
                     if (t > 150.0) {
@@ -297,12 +320,12 @@
 
                     if (hit.mat.type == MAT_DIFFUSE) {
                         rd = cosineWeightedHemisphere(n);
-                        ro = p + n * 0.005; // 沿表面法线推离
+                        ro = p + n * 0.005; 
                         throughput *= hit.mat.color;
                         
                     } else if (hit.mat.type == MAT_SCREEN) {
                         rd = uniformSphere();
-                        ro = p + rd * 0.005; // 光屏向两侧散射
+                        ro = p + rd * 0.005; 
                         throughput *= hit.mat.color;
                         
                     } else if (hit.mat.type == MAT_GLASS) {
@@ -324,7 +347,6 @@
                         } else {
                             rd = refract(rd, normal, eta);
                         }
-                        // 无论反射还是折射，都沿着光线前进方向微调起点，彻底解决自相交
                         ro = p + rd * 0.005;
                         throughput *= hit.mat.color;
                     }
@@ -357,7 +379,6 @@
             }
         `;
 
-        // === 材质初始化 ===
         const ptMaterial = new THREE.ShaderMaterial({
             uniforms: {
                 tPrevious: { value: null },
@@ -445,7 +466,7 @@
             lenses.forEach((item, i) => {
                 const f = gui.addFolder((item.type===0?'🔍 凸透镜 ':'🔮 凹透镜 ') + (i+1));
                 f.add(item.pos, 'z', -25, 25).name('Z轴位置(u/v)').onChange(syncUniforms);
-                f.add(item, 'r', 2, 30).name('曲率半径').onChange(syncUniforms);
+                f.add(item, 'r', 2, 30).name('曲率半径(越小越强)').onChange(syncUniforms);
                 f.add(item, 'aperture', 1, 8).name('光圈大小').onChange(syncUniforms);
                 f.add({del: () => { lenses.splice(i, 1); rebuildGUI(); syncUniforms(); }}, 'del').name('❌ 删除');
                 folders.push(f);
@@ -454,7 +475,7 @@
                 const f = gui.addFolder((item.type===0?'⬜ 光屏 ':'🕳️ 小孔板 ') + (i+1));
                 f.add(item.pos, 'z', -25, 25).name('Z轴位置').onChange(syncUniforms);
                 if (item.type === 1) {
-                    f.add(item, 'aperture', 0.05, 1.5).name('孔径大小').onChange(syncUniforms);
+                    f.add(item, 'aperture', 0.1, 2.5).name('孔径大小(影响亮度)').onChange(syncUniforms);
                 }
                 f.add({del: () => { screens.splice(i, 1); rebuildGUI(); syncUniforms(); }}, 'del').name('❌ 删除');
                 folders.push(f);
@@ -519,10 +540,12 @@
         let lastPinchDist = 0;
         window.addEventListener('touchstart', e => {
             if(e.target.tagName !== 'CANVAS') return;
+            e.preventDefault();
             if(e.touches.length === 1) { isDragging = true; lastMouseX = e.touches[0].clientX; lastMouseY = e.touches[0].clientY; }
         }, {passive: false});
         window.addEventListener('touchend', e => { isDragging = false; if(e.touches.length < 2) lastPinchDist = 0; });
         window.addEventListener('touchmove', e => {
+            e.preventDefault();
             if(e.touches.length === 1 && isDragging) {
                 cameraYaw -= (e.touches[0].clientX - lastMouseX) * 0.005;
                 cameraPitch -= (e.touches[0].clientY - lastMouseY) * 0.005;
