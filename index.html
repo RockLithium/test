@@ -42,7 +42,7 @@
         let lenses = [];
         let screens = [];
         let lights = [];
-        let envLight = 0.05;
+        let envLight = 0.10;
 
         // 默认场景：f=7.5的凸透镜，u=15, v=15 成等大倒立实像
         lights.push({ type: 0, pos: new THREE.Vector3(0, 0, -15), color: new THREE.Color(0xffffff) }); // F光源
@@ -50,10 +50,22 @@
         screens.push({ type: 0, pos: new THREE.Vector3(0, 0, 15), aperture: 0.3 }); // 光屏
 
         // === WebGL渲染器与相机初始化 ===
-        const renderer = new THREE.WebGLRenderer({ antialias: false });
+        // 直接创建 WebGL2 context，启用 desynchronized 提示，让渲染提交不依赖显示刷新节奏。
+        const rendererCanvas = document.createElement('canvas');
+        const rendererContext = rendererCanvas.getContext('webgl2', {
+            antialias: false,
+            powerPreference: 'high-performance',
+            desynchronized: true
+        });
+        const renderer = rendererContext
+            ? new THREE.WebGLRenderer({ canvas: rendererCanvas, context: rendererContext, antialias: false })
+            : new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+        const displayPixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+        // 显示画布使用设备像素比，减少高分屏上的界面和最终合成锯齿。
+        renderer.setPixelRatio(displayPixelRatio);
         renderer.setSize(window.innerWidth, window.innerHeight);
-        // 性能优化：强制将像素比设为1.0，极大提升路径追踪在 Retina 等高分屏上的性能
-        renderer.setPixelRatio(1.0);
+        // PT 和显示材质都会完整覆盖目标，不需要每次 render 额外清屏。
+        renderer.autoClear = false;
         document.body.appendChild(renderer.domElement);
 
         const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -66,9 +78,14 @@
         let cameraPitch = initialEuler.x;
 
         // === 累积缓冲 (Ping-Pong FBO) ===
+        // 累积缓冲必须保持像素独立，不能在线性过滤时混入相邻像素的历史结果。
         const rtOptions = { type: THREE.FloatType, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, format: THREE.RGBAFormat };
-        let rtA = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, rtOptions);
-        let rtB = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, rtOptions);
+        // 固定使用 CSS 像素分辨率进行 PT，避免高分屏把每个采样的工作量成倍放大。
+        // 最终画布仍使用 displayPixelRatio，输出由线性过滤合成到设备像素。
+        let renderWidth = Math.max(1, window.innerWidth);
+        let renderHeight = Math.max(1, window.innerHeight);
+        let rtA = new THREE.WebGLRenderTarget(renderWidth, renderHeight, rtOptions);
+        let rtB = new THREE.WebGLRenderTarget(renderWidth, renderHeight, rtOptions);
         
         const cameraPT = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
         const scenePT = new THREE.Scene();
@@ -96,6 +113,7 @@
             uniform vec3 u_lensPos[MAX_LENSES];
             uniform float u_lensR[MAX_LENSES];
             uniform float u_lensAperture[MAX_LENSES];
+            uniform float u_lensOffset[MAX_LENSES];
 
             uniform int u_numScreens;
             uniform int u_screenTypes[MAX_SCREENS];
@@ -120,10 +138,15 @@
                 vec3 emissive;
             };
 
-            struct Hit {
+            struct DistanceHit {
                 float d;
-                Material mat;
+                int id;
             };
+
+            #define ID_STAND 1
+            #define ID_LIGHT_BASE 10
+            #define ID_LENS_BASE 20
+            #define ID_SCREEN_BASE 30
 
             // 随机数生成器 (PCG)
             uint seed;
@@ -147,14 +170,6 @@
                 return normalize(t * r * cos(theta) + b * r * sin(theta) + n * sqrt(max(0.0, 1.0 - r1)));
             }
 
-            // 均匀球面采样
-            vec3 uniformSphere() {
-                float z = random() * 2.0 - 1.0;
-                float a = random() * 2.0 * 3.14159265;
-                float r = sqrt(1.0 - z * z);
-                return vec3(r * cos(a), r * sin(a), z);
-            }
-
             // SDF 形状
             float sdBox(vec3 p, vec3 b) {
                 vec3 q = abs(p) - b;
@@ -168,7 +183,7 @@
                 return min(max(d.x, d.y), 0.0) + length(max(d, 0.0));
             }
 
-            Hit opU(Hit d1, Hit d2) {
+            DistanceHit opU(DistanceHit d1, DistanceHit d2) {
                 if (d1.d < d2.d) {
                     return d1;
                 } else {
@@ -184,34 +199,34 @@
                 return min(dPole, dBase);
             }
 
-            Hit map(vec3 p) {
-                Hit res = Hit(1e20, Material(MAT_DIFFUSE, vec3(0), vec3(0)));
+            DistanceHit mapDistance(vec3 p) {
+                DistanceHit res = DistanceHit(1e20, -1);
 
                 // 桌面下移至 Y = -6.5 避免遮挡成像
                 float dBench = sdBox(p - vec3(0.0, -6.5, 0.0), vec3(4.0, 0.5, 30.0));
-                vec3 benchCol = vec3(0.15);
-                if (dBench < 0.1 && abs(p.x) < 3.0) {
-                    if (mod(p.z, 1.0) < 0.05) benchCol = vec3(0.4);
-                    if (mod(p.z, 5.0) < 0.1) benchCol = vec3(0.7);
-                }
-                res = opU(res, Hit(dBench, Material(MAT_DIFFUSE, benchCol, vec3(0))));
+                res = opU(res, DistanceHit(dBench, 0));
 
                 float dStands = 1e20;
 
                 for(int i=0; i<MAX_LIGHTS; i++) {
                     if(i >= u_numLights) break;
                     vec3 lp = p - u_lightPos[i];
-                    if (u_lightTypes[i] == 0) { 
-                        float dF1 = sdBox(lp - vec3(-1.0, 0.0, 0.0), vec3(0.2, 2.0, 0.1));
-                        float dF2 = sdBox(lp - vec3(0.3, 1.8, 0.0), vec3(1.1, 0.2, 0.1));
-                        float dF3 = sdBox(lp - vec3(0.1, 0.2, 0.0), vec3(0.9, 0.2, 0.1));
-                        float dF = min(dF1, min(dF2, dF3));
+                    if (u_lightTypes[i] == 0) {
+                        float dFBound = sdBox(lp, vec3(1.2, 2.1, 0.1));
+                        float dF = dFBound;
+                        // 远离光源时包围盒距离已足够安全；接近后再计算 F 的三个细分盒体。
+                        if (dFBound <= 0.5) {
+                            float dF1 = sdBox(lp - vec3(-1.0, 0.0, 0.0), vec3(0.2, 2.0, 0.1));
+                            float dF2 = sdBox(lp - vec3(0.3, 1.8, 0.0), vec3(1.1, 0.2, 0.1));
+                            float dF3 = sdBox(lp - vec3(0.1, 0.2, 0.0), vec3(0.9, 0.2, 0.1));
+                            dF = min(dF1, min(dF2, dF3));
+                        }
                         // 修复：大幅提亮光源，以满足小孔成像苛刻的追踪概率需求
-                        res = opU(res, Hit(dF, Material(MAT_EMISSIVE, vec3(0), u_lightColor[i] * 300.0)));
+                        res = opU(res, DistanceHit(dF, ID_LIGHT_BASE + i));
                         dStands = min(dStands, getStand(lp, -2.0)); 
                     } else if (u_lightTypes[i] == 1) { 
                         float dB = sdSphere(lp, 1.5);
-                        res = opU(res, Hit(dB, Material(MAT_EMISSIVE, vec3(0), u_lightColor[i] * 300.0)));
+                        res = opU(res, DistanceHit(dB, ID_LIGHT_BASE + i));
                         dStands = min(dStands, getStand(lp, -1.5));
                     }
                 }
@@ -222,24 +237,29 @@
                     float R = u_lensR[i];
                     float r = u_lensAperture[i];
                     float dLens = 1e20;
-                    
                     if (u_lensTypes[i] == 0) {
-                        float offset = sqrt(max(R*R - r*r, 0.001));
-                        float d1 = sdSphere(lp - vec3(0,0, offset), R);
-                        float d2 = sdSphere(lp - vec3(0,0, -offset), R);
-                        float dLens_temp = max(d1, d2);
-                        // 修复透镜厚度边界：扩大圆柱体Z轴厚度限制到5.0，防止透镜被削平
+                        float offset = u_lensOffset[i];
                         float dCyl = sdCylinderZ(lp, 5.0, r);
-                        dLens = max(dLens_temp, dCyl);
+                        if (dCyl > 0.5) {
+                            dLens = dCyl;
+                        } else {
+                            float d1 = sdSphere(lp - vec3(0,0, offset), R);
+                            float d2 = sdSphere(lp - vec3(0,0, -offset), R);
+                            dLens = max(max(d1, d2), dCyl);
+                        }
                     } else if (u_lensTypes[i] == 1) {
                         // 修复凹透镜致命Bug：之前0.5厚度会让边缘被一刀切成平面玻璃，彻底失去发散作用
                         float dCyl = sdCylinderZ(lp, 5.0, r);
-                        float offset = R + 0.2; 
-                        float d1 = sdSphere(lp - vec3(0,0, offset), R);
-                        float d2 = sdSphere(lp - vec3(0,0, -offset), R);
-                        dLens = max(dCyl, max(-d1, -d2));
+                        float offset = u_lensOffset[i];
+                        if (dCyl > 0.5) {
+                            dLens = dCyl;
+                        } else {
+                            float d1 = sdSphere(lp - vec3(0,0, offset), R);
+                            float d2 = sdSphere(lp - vec3(0,0, -offset), R);
+                            dLens = max(dCyl, max(-d1, -d2));
+                        }
                     }
-                    res = opU(res, Hit(dLens, Material(MAT_GLASS, vec3(0.98, 0.99, 1.0), vec3(0))));
+                    res = opU(res, DistanceHit(dLens, ID_LENS_BASE + i));
                     dStands = min(dStands, getStand(lp, -r)); 
                 }
 
@@ -248,29 +268,58 @@
                     vec3 sp = p - u_screenPos[i];
                     if (u_screenTypes[i] == 0) {
                         float dS = sdBox(sp, vec3(4.5, 4.5, 0.05));
-                        res = opU(res, Hit(dS, Material(MAT_SCREEN, vec3(0.95), vec3(0))));
+                        res = opU(res, DistanceHit(dS, ID_SCREEN_BASE + i));
                     } else if (u_screenTypes[i] == 1) {
                         // 修复小孔成像：将小孔板做得极薄，防止射线穿孔时在厚壁内来回反弹阵亡
                         float dBoard = sdBox(sp, vec3(4.5, 4.5, 0.005));
                         float dHole = sdCylinderZ(sp, 0.2, u_screenAperture[i]); 
                         float dPinhole = max(dBoard, -dHole);
-                        res = opU(res, Hit(dPinhole, Material(MAT_DIFFUSE, vec3(0.2), vec3(0))));
+                        res = opU(res, DistanceHit(dPinhole, ID_SCREEN_BASE + i));
                     }
                     dStands = min(dStands, getStand(sp, -4.5));
                 }
 
-                res = opU(res, Hit(dStands, Material(MAT_DIFFUSE, vec3(0.25), vec3(0))));
+                res = opU(res, DistanceHit(dStands, ID_STAND));
 
                 return res;
             }
 
+            Material getMaterial(vec3 p, int id) {
+                if (id == 0) {
+                    vec3 benchCol = vec3(0.15);
+                    if (mod(p.z, 1.0) < 0.05 && abs(p.x) < 3.0) benchCol = vec3(0.4);
+                    if (mod(p.z, 5.0) < 0.1 && abs(p.x) < 3.0) benchCol = vec3(0.7);
+                    return Material(MAT_DIFFUSE, benchCol, vec3(0));
+                }
+
+                if (id >= ID_LIGHT_BASE && id < ID_LIGHT_BASE + MAX_LIGHTS) {
+                    int i = id - ID_LIGHT_BASE;
+                    return Material(MAT_EMISSIVE, vec3(0), u_lightColor[i] * 300.0);
+                }
+
+                if (id >= ID_LENS_BASE && id < ID_LENS_BASE + MAX_LENSES) {
+                    return Material(MAT_GLASS, vec3(0.98, 0.99, 1.0), vec3(0));
+                }
+
+                if (id >= ID_SCREEN_BASE && id < ID_SCREEN_BASE + MAX_SCREENS) {
+                    int i = id - ID_SCREEN_BASE;
+                    if (u_screenTypes[i] == 0) {
+                        return Material(MAT_SCREEN, vec3(0.95), vec3(0));
+                    }
+                    return Material(MAT_DIFFUSE, vec3(0.2), vec3(0));
+                }
+
+                return Material(MAT_DIFFUSE, vec3(0.25), vec3(0));
+            }
             vec3 calcNormal(vec3 p) {
-                vec2 e = vec2(0.002, 0);
-                return normalize(vec3(
-                    map(p + e.xyy).d - map(p - e.xyy).d,
-                    map(p + e.yxy).d - map(p - e.yxy).d,
-                    map(p + e.yyx).d - map(p - e.yyx).d
-                ));
+                // 四面体差分：保持法线质量的同时，把 6 次 map() 降为 4 次。
+                vec2 e = vec2(1.0, -1.0) * 0.5773 * 0.002;
+                return normalize(
+                    e.xyy * mapDistance(p + e.xyy).d +
+                    e.yyx * mapDistance(p + e.yyx).d +
+                    e.yxy * mapDistance(p + e.yxy).d +
+                    e.xxx * mapDistance(p + e.xxx).d
+                );
             }
 
             void main() {
@@ -293,16 +342,16 @@
                         throughput /= pAlive;
                     }
 
-                    Hit hit = Hit(1e20, Material(MAT_DIFFUSE, vec3(0), vec3(0)));
+                    DistanceHit hit = DistanceHit(1e20, -1);
                     float t = 0.0;
                     
                     // 加大最大步进次数防止穿孔时光线漏算
                     for (int i = 0; i < 150; i++) {
-                        vec3 p = ro + rd * t;
-                        Hit h = map(p);
-                        if (abs(h.d) < 0.001) { hit = h; break; }
                         if (t > 150.0) break;
-                        t += abs(h.d) * 0.99; 
+                        vec3 p = ro + rd * t;
+                        DistanceHit h = mapDistance(p);
+                        if (abs(h.d) < 0.001) { hit = h; break; }
+                        t += abs(h.d) * 0.99;
                     }
 
                     if (t > 150.0) {
@@ -311,24 +360,27 @@
                     }
 
                     vec3 p = ro + rd * t;
-                    vec3 n = calcNormal(p);
+                    Material mat = getMaterial(p, hit.id);
 
-                    if (hit.mat.type == MAT_EMISSIVE) {
-                        color += throughput * hit.mat.emissive;
+                    if (mat.type == MAT_EMISSIVE) {
+                        color += throughput * mat.emissive;
                         break;
                     }
 
-                    if (hit.mat.type == MAT_DIFFUSE) {
+                    vec3 n = calcNormal(p);
+
+                    if (mat.type == MAT_DIFFUSE) {
                         rd = cosineWeightedHemisphere(n);
-                        ro = p + n * 0.005; 
-                        throughput *= hit.mat.color;
+                        ro = p + n * 0.005;
+                        throughput *= mat.color;
                         
-                    } else if (hit.mat.type == MAT_SCREEN) {
-                        rd = uniformSphere();
-                        ro = p + rd * 0.005; 
-                        throughput *= hit.mat.color;
+                    } else if (mat.type == MAT_SCREEN) {
+                        // 光屏只向法线半球散射，避免一半样本射进屏幕后方。
+                        rd = cosineWeightedHemisphere(n);
+                        ro = p + n * 0.005;
+                        throughput *= mat.color;
                         
-                    } else if (hit.mat.type == MAT_GLASS) {
+                    } else if (mat.type == MAT_GLASS) {
                         float ior = 1.5;
                         bool entering = dot(rd, n) < 0.0;
                         float eta = entering ? 1.0 / ior : ior;
@@ -348,7 +400,7 @@
                             rd = refract(rd, normal, eta);
                         }
                         ro = p + rd * 0.005;
-                        throughput *= hit.mat.color;
+                        throughput *= mat.color;
                     }
                 }
 
@@ -362,10 +414,40 @@
             precision highp float;
             varying vec2 vUv;
             uniform sampler2D tTexture;
-            
+            uniform float u_exposure;
+            uniform vec2 u_textureResolution;
+
+            // 累积纹理保持 NearestFilter；只在最终显示阶段手动双线性采样。
+            vec3 sampleAccumulation(vec2 uv) {
+                vec2 texel = 1.0 / u_textureResolution;
+                vec2 coord = uv * u_textureResolution - 0.5;
+                vec2 base = floor(coord);
+                vec2 f = fract(coord);
+                vec2 uv00 = (base + vec2(0.5, 0.5)) * texel;
+                vec2 uv10 = uv00 + vec2(texel.x, 0.0);
+                vec2 uv01 = uv00 + vec2(0.0, texel.y);
+                vec2 uv11 = uv00 + texel;
+                vec3 row0 = mix(texture2D(tTexture, uv00).rgb, texture2D(tTexture, uv10).rgb, f.x);
+                vec3 row1 = mix(texture2D(tTexture, uv01).rgb, texture2D(tTexture, uv11).rgb, f.x);
+                return mix(row0, row1, f.y);
+            }
+
+            // Hable filmic 曲线：压低高光硬截断，保留颜色层次。
+            vec3 filmic(vec3 x) {
+                const float A = 0.15;
+                const float B = 0.50;
+                const float C = 0.10;
+                const float D = 0.20;
+                const float E = 0.02;
+                const float F = 0.30;
+                return ((x * (A * x + C * B) + D * E) /
+                        (x * (A * x + B) + D * F)) - E / F;
+            }
             void main() {
-                vec3 color = texture2D(tTexture, vUv).rgb;
-                color = clamp((color * (2.51 * color + 0.03)) / (color * (2.43 * color + 0.59) + 0.14), 0.0, 1.0);
+                vec3 color = max(sampleAccumulation(vUv), 0.0);
+                // 提高白点，避免光源和屏幕高亮过早被压成纯白。
+                vec3 whiteScale = 1.0 / filmic(vec3(32.0));
+                color = clamp(filmic(color * u_exposure) * whiteScale, 0.0, 1.0);
                 color = pow(color, vec3(1.0 / 2.2));
                 gl_FragColor = vec4(color, 1.0);
             }
@@ -383,7 +465,7 @@
             uniforms: {
                 tPrevious: { value: null },
                 u_sampleCount: { value: 1.0 },
-                u_resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+                u_resolution: { value: new THREE.Vector2(renderWidth, renderHeight) },
                 u_cameraWorldMatrix: { value: camera.matrixWorld },
                 u_cameraProjectionMatrixInverse: { value: camera.projectionMatrixInverse },
                 u_frame: { value: 0 },
@@ -393,6 +475,7 @@
                 u_lensPos: { value: Array(MAX_LENSES).fill().map(()=>new THREE.Vector3()) },
                 u_lensR: { value: new Float32Array(MAX_LENSES).fill(0) },
                 u_lensAperture: { value: new Float32Array(MAX_LENSES).fill(0) },
+                u_lensOffset: { value: new Float32Array(MAX_LENSES).fill(0) },
                 u_numScreens: { value: 0 },
                 u_screenTypes: { value: new Int32Array(MAX_SCREENS).fill(0) },
                 u_screenPos: { value: Array(MAX_SCREENS).fill().map(()=>new THREE.Vector3()) },
@@ -408,7 +491,11 @@
         });
 
         const displayMaterial = new THREE.ShaderMaterial({
-            uniforms: { tTexture: { value: null } },
+            uniforms: {
+                tTexture: { value: null },
+                u_exposure: { value: 0.8 },
+                u_textureResolution: { value: new THREE.Vector2(renderWidth, renderHeight) }
+            },
             vertexShader,
             fragmentShader: displayFragmentShader,
             depthWrite: false, depthTest: false
@@ -428,6 +515,9 @@
                 ptMaterial.uniforms.u_lensPos.value[i].copy(lenses[i].pos);
                 ptMaterial.uniforms.u_lensR.value[i] = lenses[i].r;
                 ptMaterial.uniforms.u_lensAperture.value[i] = lenses[i].aperture;
+                ptMaterial.uniforms.u_lensOffset.value[i] = lenses[i].type === 0
+                    ? Math.sqrt(Math.max(lenses[i].r * lenses[i].r - lenses[i].aperture * lenses[i].aperture, 0.001))
+                    : lenses[i].r + 0.2;
             }
             ptMaterial.uniforms.u_numScreens.value = screens.length;
             for(let i=0; i<screens.length; i++) {
@@ -520,7 +610,8 @@
                 cameraYaw -= (e.clientX - lastMouseX) * 0.005;
                 cameraPitch -= (e.clientY - lastMouseY) * 0.005;
                 cameraPitch = Math.max(-Math.PI/2 + 0.1, Math.min(Math.PI/2 - 0.1, cameraPitch));
-                camera.quaternion.setFromEuler(new THREE.Euler(cameraPitch, cameraYaw, 0, 'YXZ'));
+                cameraEuler.set(cameraPitch, cameraYaw, 0, 'YXZ');
+                camera.quaternion.setFromEuler(cameraEuler);
                 lastMouseX = e.clientX; lastMouseY = e.clientY;
                 requestReset();
             }
@@ -538,6 +629,7 @@
         window.addEventListener('keyup', e => { if(keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = false; });
 
         let lastPinchDist = 0;
+        const cameraEuler = new THREE.Euler(0, 0, 0, 'YXZ');
         window.addEventListener('touchstart', e => {
             if(e.target.tagName !== 'CANVAS') return;
             e.preventDefault();
@@ -550,7 +642,8 @@
                 cameraYaw -= (e.touches[0].clientX - lastMouseX) * 0.005;
                 cameraPitch -= (e.touches[0].clientY - lastMouseY) * 0.005;
                 cameraPitch = Math.max(-Math.PI/2 + 0.1, Math.min(Math.PI/2 - 0.1, cameraPitch));
-                camera.quaternion.setFromEuler(new THREE.Euler(cameraPitch, cameraYaw, 0, 'YXZ'));
+                cameraEuler.set(cameraPitch, cameraYaw, 0, 'YXZ');
+                camera.quaternion.setFromEuler(cameraEuler);
                 lastMouseX = e.touches[0].clientX; lastMouseY = e.touches[0].clientY;
                 requestReset();
             } else if (e.touches.length === 2) {
@@ -575,25 +668,29 @@
             } catch(e) { console.warn('摇杆加载失败'); }
         }
 
-        function updateCameraTransform() {
-            let moved = false;
-            const speed = 0.3;
-            const forward = new THREE.Vector3(0, 0, -1).applyEuler(camera.rotation).normalize();
-            const right = new THREE.Vector3(1, 0, 0).applyEuler(camera.rotation).normalize();
-            const up = new THREE.Vector3(0, 1, 0);
+        const forward = new THREE.Vector3();
+        const right = new THREE.Vector3();
+        const up = new THREE.Vector3(0, 1, 0);
+        const moveDirection = new THREE.Vector3();
 
-            let dir = new THREE.Vector3();
-            if(keys.w) dir.add(forward); if(keys.s) dir.sub(forward);
-            if(keys.a) dir.sub(right); if(keys.d) dir.add(right);
-            if(keys.e) dir.add(up); if(keys.q) dir.sub(up);
+        function updateCameraTransform(deltaSeconds) {
+            let moved = false;
+            const speed = 18.0;
+            forward.set(0, 0, -1).applyEuler(camera.rotation).normalize();
+            right.set(1, 0, 0).applyEuler(camera.rotation).normalize();
+
+            moveDirection.set(0, 0, 0);
+            if(keys.w) moveDirection.add(forward); if(keys.s) moveDirection.sub(forward);
+            if(keys.a) moveDirection.sub(right); if(keys.d) moveDirection.add(right);
+            if(keys.e) moveDirection.add(up); if(keys.q) moveDirection.sub(up);
 
             if(joyMove.x !== 0 || joyMove.y !== 0) {
-                dir.add(forward.clone().multiplyScalar(joyMove.y));
-                dir.add(right.clone().multiplyScalar(joyMove.x));
+                moveDirection.addScaledVector(forward, joyMove.y);
+                moveDirection.addScaledVector(right, joyMove.x);
             }
 
-            if(dir.lengthSq() > 0.01) {
-                camera.position.add(dir.normalize().multiplyScalar(speed));
+            if(moveDirection.lengthSq() > 0.01) {
+                camera.position.add(moveDirection.normalize().multiplyScalar(speed * deltaSeconds));
                 moved = true;
             }
             if(moved) requestReset();
@@ -607,44 +704,148 @@
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
-            rtA.setSize(window.innerWidth, window.innerHeight);
-            rtB.setSize(window.innerWidth, window.innerHeight);
-            ptMaterial.uniforms.u_resolution.value.set(window.innerWidth, window.innerHeight);
-            requestReset();
+            renderWidth = Math.max(1, window.innerWidth);
+            renderHeight = Math.max(1, window.innerHeight);
+            rtA.setSize(renderWidth, renderHeight);
+            rtB.setSize(renderWidth, renderHeight);
+            ptMaterial.uniforms.u_resolution.value.set(renderWidth, renderHeight);
+            displayMaterial.uniforms.u_textureResolution.value.set(renderWidth, renderHeight);
+            resetAccumulation();
         });
 
         const sampleCountSpan = document.getElementById('sample-count');
         const loadingDiv = document.getElementById('loading');
-        
-        function animate() {
-            requestAnimationFrame(animate);
-            updateCameraTransform();
+        let lastUiUpdate = 0;
 
-            ptMaterial.uniforms.u_frame.value++;
+        function resetAccumulation() {
+            needsReset = true;
+            ptMaterial.uniforms.u_sampleCount.value = 1.0;
+            sampleCountSpan.innerText = '0';
+            lastUiUpdate = performance.now();
 
-            if (needsReset) {
-                ptMaterial.uniforms.u_sampleCount.value = 1.0;
-                needsReset = false;
-            } else {
-                ptMaterial.uniforms.u_sampleCount.value += 1.0;
+            // resize 后立即清空两个 ping-pong 缓冲，避免旧图像残留。
+            renderer.setRenderTarget(rtA);
+            renderer.clearColor();
+            renderer.setRenderTarget(rtB);
+            renderer.clearColor();
+            renderer.setRenderTarget(null);
+        }
+
+        // 用 GPU fence + MessageChannel 解耦 PT 计算和屏幕刷新。
+        // 浏览器仍可能按显示器刷新合成画面，但 GPU pass 不再由 requestAnimationFrame 限速。
+        const renderContext = renderer.getContext();
+        const gpuFences = [];
+        const renderChannel = new MessageChannel();
+        const maxInFlight = 2;
+        // 从 4 pass 起步；根据实际采样速率动态调整，避免核显一次卡住太久。
+        let passesPerBatch = 4;
+        const minPassesPerBatch = 1;
+        const maxPassesPerBatch = 8;
+        const batchRateWindowMs = 750;
+        const batchRateLow = 120.0;
+        const batchRateHigh = 450.0;
+        let batchRateWindowStart = performance.now();
+        let batchRateSampleStart = ptMaterial.uniforms.u_sampleCount.value;
+        let batchRateEma = 0;
+        const hasGpuFence = typeof renderContext.fenceSync === 'function';
+        let renderRunning = true;
+        let lastRenderTime = performance.now();
+
+        function adaptBatchSize(now) {
+            const currentSample = ptMaterial.uniforms.u_sampleCount.value;
+            if (currentSample < batchRateSampleStart) {
+                batchRateSampleStart = currentSample;
+                batchRateWindowStart = now;
+                return;
             }
 
-            ptMaterial.uniforms.tPrevious.value = rtA.texture;
-            renderer.setRenderTarget(rtB);
-            renderer.render(scenePT, cameraPT);
+            const elapsed = now - batchRateWindowStart;
+            if (elapsed < batchRateWindowMs) return;
 
-            displayMaterial.uniforms.tTexture.value = rtB.texture;
+            const sampleRate = (currentSample - batchRateSampleStart) * 1000.0 / elapsed;
+            batchRateEma = batchRateEma === 0 ? sampleRate : batchRateEma * 0.7 + sampleRate * 0.3;
+            batchRateSampleStart = currentSample;
+            batchRateWindowStart = now;
+
+            // 用 2 倍/二分并带滞回，避免批次大小在边界附近来回抖动。
+            if (batchRateEma < batchRateLow && passesPerBatch > minPassesPerBatch) {
+                passesPerBatch = Math.max(minPassesPerBatch, Math.floor(passesPerBatch * 0.5));
+            } else if (batchRateEma > batchRateHigh && passesPerBatch < maxPassesPerBatch) {
+                passesPerBatch = Math.min(maxPassesPerBatch, passesPerBatch * 2);
+            }
+        }
+
+        function renderPass() {
+            const now = performance.now();
+            const deltaSeconds = Math.min((now - lastRenderTime) * 0.001, 0.1);
+            lastRenderTime = now;
+
+            updateCameraTransform(deltaSeconds);
+            for (let pass = 0; pass < passesPerBatch; pass++) {
+                ptMaterial.uniforms.u_frame.value++;
+
+                if (needsReset) {
+                    ptMaterial.uniforms.u_sampleCount.value = 1.0;
+                    needsReset = false;
+                } else {
+                    ptMaterial.uniforms.u_sampleCount.value += 1.0;
+                }
+
+                ptMaterial.uniforms.tPrevious.value = rtA.texture;
+                renderer.setRenderTarget(rtB);
+                renderer.render(scenePT, cameraPT);
+
+                let temp = rtA; rtA = rtB; rtB = temp;
+            }
+
+            displayMaterial.uniforms.tTexture.value = rtA.texture;
             renderer.setRenderTarget(null);
             renderer.render(sceneDisplay, cameraPT);
 
-            let temp = rtA; rtA = rtB; rtB = temp;
-
-            sampleCountSpan.innerText = Math.floor(ptMaterial.uniforms.u_sampleCount.value);
+            // DOM 更新不参与每个 PT pass，避免解锁后让文本布局成为新瓶颈。
+            if (now - lastUiUpdate >= 100) {
+                sampleCountSpan.innerText = Math.floor(ptMaterial.uniforms.u_sampleCount.value);
+                lastUiUpdate = now;
+            }
             if (loadingDiv.style.display !== 'none') loadingDiv.style.display = 'none';
         }
 
+        function renderLoop() {
+            if (!renderRunning) return;
+
+            if (hasGpuFence) {
+                while (gpuFences.length > 0) {
+                    const fence = gpuFences[0];
+                    const result = renderContext.clientWaitSync(fence.sync, 0, 0);
+                    if (result === renderContext.TIMEOUT_EXPIRED || result === renderContext.WAIT_FAILED) break;
+                    gpuFences.shift();
+                    renderContext.deleteSync(fence.sync);
+                }
+
+                if (gpuFences.length >= maxInFlight) {
+                    setTimeout(renderLoop, 1);
+                    return;
+                }
+            }
+
+            adaptBatchSize(performance.now());
+
+            renderPass();
+
+            if (hasGpuFence) {
+                gpuFences.push({
+                    sync: renderContext.fenceSync(renderContext.SYNC_GPU_COMMANDS_COMPLETE, 0),
+                    submittedAt: performance.now()
+                });
+                renderContext.flush();
+            }
+
+            renderChannel.port1.postMessage(null);
+        }
+
         camera.updateMatrixWorld();
-        animate();
+        renderChannel.port2.onmessage = renderLoop;
+        renderChannel.port1.postMessage(null);
     </script>
 </body>
 </html>
