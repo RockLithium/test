@@ -71,6 +71,139 @@ h2 .sub{font-weight:400;letter-spacing:0;color:#6c7488}
 #circleView{width:100%;height:150px;display:block;background:#12151b;border:1px solid var(--line);border-radius:8px;margin-top:12px}
 #sideView{width:100%;height:200px;display:block;background:#12151b;border:1px solid var(--line);border-radius:8px}
 .info b.ok{color:#5be08a}.info b.bad{color:#ff7a6b}
+.m-hint{display:none}
+
+/* ---------------- 移动端专用响应式排布（仅在 <= 860px 生效，桌面端完全不变） ---------------- */
+@media (max-width: 860px) {
+  .d-hint{display:none}
+  .m-hint{display:inline}
+
+  header{
+    height:auto;
+    min-height:50px;
+    padding:8px 10px;
+    flex-wrap:wrap;
+    gap:8px;
+  }
+  .logo{
+    margin-right:auto;
+    gap:8px;
+  }
+  .logo .mark{
+    width:24px;
+    height:24px;
+    border-radius:6px;
+  }
+  .logo h1{
+    font-size:14px;
+  }
+  .logo small{
+    display:none;
+  }
+  .tabs{
+    order:3;
+    width:100%;
+    margin:0;
+    gap:2px;
+  }
+  .tabs button{
+    flex:1;
+    padding:7px 4px;
+    font-size:12px;
+    text-align:center;
+  }
+  .spacer{
+    display:none;
+  }
+  .tools{
+    order:4;
+    width:100%;
+    display:flex;
+    overflow-x:auto;
+    -webkit-overflow-scrolling:touch;
+    gap:6px;
+    padding:1px 0 3px;
+  }
+  .tools::-webkit-scrollbar{
+    display:none;
+  }
+  .tools button{
+    flex:none;
+    white-space:nowrap;
+    padding:6px 11px;
+    font-size:12px;
+    border-radius:6px;
+  }
+
+  main{
+    flex-direction:column;
+    min-height:0;
+    flex:1;
+  }
+  #stage{
+    flex:none;
+    height:38vh;
+    min-height:190px;
+    max-height:44vh;
+    width:100%;
+    border-bottom:1px solid var(--line);
+    padding:4px;
+  }
+  #hint, #shHint{
+    font-size:10.5px;
+    padding:4px 10px;
+    bottom:6px;
+    max-width:94%;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  aside{
+    flex:1;
+    width:100%;
+    min-height:0;
+    border-left:none;
+    padding:10px 14px 44px;
+    -webkit-overflow-scrolling:touch;
+  }
+  section{
+    padding:12px 0;
+  }
+  .ctl{
+    margin-bottom:10px;
+  }
+  .ctl .row span:first-child{
+    font-size:12.5px;
+  }
+  input[type=range]{
+    height:6px;
+  }
+  input[type=range]::-webkit-slider-thumb{
+    width:20px;
+    height:20px;
+  }
+  input[type=range]::-moz-range-thumb{
+    width:16px;
+    height:16px;
+  }
+  #diagram{
+    height:140px;
+  }
+  #sideView{
+    height:160px;
+  }
+  #circleView{
+    height:130px;
+  }
+  .seg button{
+    padding:8px 4px;
+    font-size:12px;
+  }
+  .chips button{
+    padding:6px 12px;
+    font-size:12px;
+  }
+}
 </style>
 </head>
 <body data-tab="shift">
@@ -98,13 +231,19 @@ h2 .sub{font-weight:400;letter-spacing:0;color:#6c7488}
 <main>
   <div id="stage">
     <canvas id="shiftCanvas" class="shift-only"></canvas>
-    <div id="shHint" class="shift-only"><b>拖动画面</b> 移动镜头（Shift） · <b>滚轮</b> 变焦 · <b>Shift+滚轮</b> 前后移动相机</div>
+    <div id="shHint" class="shift-only">
+      <span class="d-hint"><b>拖动画面</b> 移动镜头（Shift） · <b>滚轮</b> 变焦 · <b>Shift+滚轮</b> 前后移动相机</span>
+      <span class="m-hint"><b>拖动画面</b> 位移镜头 · <b>下方滑块</b> 调节焦距与距离</span>
+    </div>
     <div id="wrap" class="tilt-only">
       <canvas id="gl"></canvas>
       <canvas id="overlay"></canvas>
       <div id="badge">原图</div>
     </div>
-    <div id="hint" class="tilt-only"><b>拖动</b> 移动焦点 · <b>Shift+拖动</b> 旋转 · <b>滚轮</b> 清晰带宽度 · <b>空格</b> 对比原图 · 可拖入/粘贴图片</div>
+    <div id="hint" class="tilt-only">
+      <span class="d-hint"><b>拖动</b> 移动焦点 · <b>Shift+拖动</b> 旋转 · <b>滚轮</b> 清晰带宽度 · <b>空格</b> 对比原图 · 可拖入/粘贴图片</span>
+      <span class="m-hint"><b>拖动画面</b> 移动焦点 · <b>拖动蓝点</b> 旋转 · <b>下方滑块</b> 调参数</span>
+    </div>
     <div id="drop">松开鼠标以载入图片</div>
     <div id="err">您的浏览器不支持 WebGL，无法运行本模拟器。</div>
   </div>
@@ -377,7 +516,7 @@ let cssW = 0, cssH = 0, hovering = false, dragging = null, flashUntil = 0;
 function fit() {
   if (!W) return;
   const r = stage.getBoundingClientRect();
-  const s = Math.min((r.width - 48) / W, (r.height - 70) / H);
+  const s = Math.min((r.width - (r.width < 600 ? 16 : 48)) / W, (r.height - (r.height < 400 ? 28 : 70)) / H);
   cssW = Math.max(50, Math.floor(W * s)); cssH = Math.max(50, Math.floor(H * s));
   wrap.style.width = cssW + 'px'; wrap.style.height = cssH + 'px';
   const d = devicePixelRatio || 1;
@@ -923,8 +1062,10 @@ function renderView(g, vp, o, opts) {
     chip(g, vp.x + 10, vp.y + 10, opts.cap, '#f5b544', false, fs);
     if (m.conv != null) { const ok = Math.abs(m.conv) < 0.3;
       chip(g, vp.x + vp.w - 10, vp.y + 10, ok ? '✓ 竖线平行' : `✗ 竖线汇聚 ${Math.abs(m.conv).toFixed(1)}°`, ok ? '#5be08a' : '#ff7a6b', true, fs); }
-    chip(g, vp.x + 10, bot - fs * 1.9 - 10,
-      `${c.f.toFixed(0)}mm · 距离 ${c.D.toFixed(0)}m · 机高 ${c.camH.toFixed(1)}m · 俯仰 ${c.pitch.toFixed(1)}° · 位移 ↕${c.shiftY.toFixed(1)} ↔${c.shiftX.toFixed(1)}mm`, '#d5d9e2', false, fs - 1);
+    const paramText = vp.w < 270
+      ? `${c.f.toFixed(0)}mm · ↕${c.shiftY.toFixed(1)}mm`
+      : `${c.f.toFixed(0)}mm · 距离 ${c.D.toFixed(0)}m · 机高 ${c.camH.toFixed(1)}m · 俯仰 ${c.pitch.toFixed(1)}° · 位移 ↕${c.shiftY.toFixed(1)} ↔${c.shiftX.toFixed(1)}mm`;
+    chip(g, vp.x + 10, bot - fs * 1.9 - 10, paramText, '#d5d9e2', false, fs - 1);
   }
   return m;
 }
@@ -949,8 +1090,10 @@ function viewsFor() {
   return [{ o:{ ...SH }, cap: parts.join(' + '), col:'#f5b544', name:'当前' }];
 }
 function layout(W, H, n) {
-  const pad = 24, gap = 18, top = 18, bottom = 52, aw = (W - pad * 2 - gap * (n - 1)) / n, ah = H - top - bottom;
-  const w = Math.max(60, Math.min(aw, ah * 1.5)), h = w / 1.5, x0 = (W - (w * n + gap * (n - 1))) / 2, y0 = top + (ah - h) / 2;
+  const isMobile = W < 600;
+  const pad = isMobile ? 8 : 24, gap = isMobile ? 6 : 18, top = isMobile ? 6 : 18, bottom = isMobile ? 26 : 52;
+  const aw = (W - pad * 2 - gap * (n - 1)) / n, ah = H - top - bottom;
+  const w = Math.max(50, Math.min(aw, ah * 1.5)), h = w / 1.5, x0 = (W - (w * n + gap * (n - 1))) / 2, y0 = top + (ah - h) / 2;
   return Array.from({ length: n }, (_, i) => { const x = x0 + i * (w + gap); return { x, y: y0, w, h, cx: x + w / 2, cy: y0 + h / 2, k: w / SW }; });
 }
 function renderAll(g, W, H) {
