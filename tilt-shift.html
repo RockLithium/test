@@ -1,0 +1,1170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>移轴镜头模拟器 · Tilt-Shift</title>
+<style>
+:root{--bg:#0e1014;--panel:#161920;--panel2:#1d212a;--line:#292e39;--text:#e7e9ef;--muted:#8a92a6;--accent:#f5b544;--accent2:#5cc8ff;}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:"PingFang SC","Microsoft YaHei","Noto Sans SC","Hiragino Sans GB",system-ui,sans-serif;background:var(--bg);color:var(--text);display:flex;flex-direction:column;overflow:hidden;font-size:13px;user-select:none}
+header{height:58px;flex:none;display:flex;align-items:center;gap:10px;padding:0 18px;border-bottom:1px solid var(--line);background:var(--panel)}
+.logo{display:flex;align-items:center;gap:10px;margin-right:auto}
+.logo .mark{width:30px;height:30px;border-radius:8px;background:linear-gradient(180deg,#5cc8ff 0 30%,#f5b544 30% 70%,#5cc8ff 70%);filter:saturate(1.2);box-shadow:0 0 0 1px rgba(255,255,255,.1) inset}
+.logo h1{font-size:16px;font-weight:600;letter-spacing:.5px}
+.logo small{display:block;color:var(--muted);font-size:11px;font-weight:400;letter-spacing:.3px}
+button{font:inherit;color:var(--text);background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:7px 13px;cursor:pointer;transition:.15s}
+button:hover{border-color:#3b4250;background:#232833}
+button.primary{background:var(--accent);color:#1b1404;border-color:var(--accent);font-weight:600}
+button.primary:hover{filter:brightness(1.08)}
+button.active{border-color:var(--accent);color:var(--accent)}
+main{flex:1;display:flex;min-height:0}
+#stage{flex:1;position:relative;display:flex;align-items:center;justify-content:center;min-width:0;
+  background:radial-gradient(circle at 50% 40%,#1a1e26,#0c0e12 70%)}
+#wrap{position:relative;box-shadow:0 20px 60px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.06);border-radius:4px;overflow:hidden}
+#gl{display:block;width:100%;height:100%}
+#overlay{position:absolute;inset:0;width:100%;height:100%;cursor:crosshair;touch-action:none}
+#badge{position:absolute;left:12px;top:12px;background:rgba(0,0,0,.6);padding:4px 10px;border-radius:20px;font-size:12px;display:none;pointer-events:none}
+#hint{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);color:var(--muted);font-size:12px;background:rgba(10,12,16,.7);padding:6px 14px;border-radius:20px;white-space:nowrap;pointer-events:none}
+#hint b{color:var(--text);font-weight:500}
+#drop{position:absolute;inset:14px;border:2px dashed var(--accent);border-radius:14px;display:none;align-items:center;justify-content:center;font-size:18px;color:var(--accent);background:rgba(14,16,20,.75);pointer-events:none;z-index:5}
+aside{width:340px;flex:none;overflow-y:auto;background:var(--panel);border-left:1px solid var(--line);padding:6px 14px 20px}
+aside::-webkit-scrollbar{width:8px}aside::-webkit-scrollbar-thumb{background:#2a2f3a;border-radius:4px}
+section{padding:14px 0;border-bottom:1px solid var(--line)}
+section:last-child{border-bottom:none}
+h2{font-size:12px;font-weight:600;color:var(--muted);letter-spacing:1px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chips button{padding:5px 10px;font-size:12px;border-radius:20px}
+.seg{display:flex;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:3px;margin-bottom:14px}
+.seg button{flex:1;border:none;background:none;padding:6px;border-radius:6px;color:var(--muted)}
+.seg button.on{background:#2b313d;color:var(--text)}
+.ctl{margin-bottom:12px}
+.ctl .row{display:flex;justify-content:space-between;margin-bottom:6px;cursor:default}
+.ctl .row span:first-child{color:#c6cbd6}
+.ctl .val{color:var(--accent);font-variant-numeric:tabular-nums;font-size:12px}
+.ctl.hide{display:none}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:4px;border-radius:2px;outline:none;cursor:pointer;
+  background:linear-gradient(90deg,var(--accent) var(--p,50%),#2c313c var(--p,50%))}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:#fff;border:3px solid var(--accent);box-shadow:0 1px 4px rgba(0,0,0,.5)}
+input[type=range]::-moz-range-thumb{width:10px;height:10px;border-radius:50%;background:#fff;border:3px solid var(--accent)}
+#diagram{width:100%;height:180px;display:block;background:#12151b;border:1px solid var(--line);border-radius:8px;margin-top:4px}
+.info{color:var(--muted);font-size:11.5px;margin-top:8px;line-height:1.6}
+label.chk{display:flex;align-items:center;gap:8px;color:#c6cbd6;cursor:pointer}
+label.chk input{accent-color:var(--accent)}
+.tips{color:var(--muted);font-size:11.5px;line-height:1.9}
+.tips kbd{background:#252a34;border:1px solid #333a47;border-radius:4px;padding:0 5px;font-family:inherit;font-size:11px;color:#d5d9e2}
+#err{position:absolute;inset:0;display:none;align-items:center;justify-content:center;color:#ff8080;font-size:15px}
+.logo{margin-right:8px}
+.spacer{flex:1}
+.tabs{display:flex;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:3px}
+.tabs button{border:none;background:none;color:var(--muted);padding:7px 14px;border-radius:7px}
+.tabs button.on{background:#2b313d;color:var(--text);box-shadow:0 0 0 1px rgba(245,181,68,.35) inset}
+.tools{display:flex;gap:10px}
+body[data-tab="tilt"] .shift-only, body[data-tab="shift"] .tilt-only{display:none!important}
+#shiftCanvas{position:absolute;inset:0;width:100%;height:100%;cursor:grab;touch-action:none}
+#shiftCanvas:active{cursor:grabbing}
+#shHint{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);color:var(--muted);font-size:12px;background:rgba(10,12,16,.7);padding:6px 14px;border-radius:20px;white-space:nowrap;pointer-events:none}
+#shHint b{color:var(--text);font-weight:500}
+h2 .sub{font-weight:400;letter-spacing:0;color:#6c7488}
+.seg3 button{font-size:12px;padding:6px 2px}
+#circleView{width:100%;height:150px;display:block;background:#12151b;border:1px solid var(--line);border-radius:8px;margin-top:12px}
+#sideView{width:100%;height:200px;display:block;background:#12151b;border:1px solid var(--line);border-radius:8px}
+.info b.ok{color:#5be08a}.info b.bad{color:#ff7a6b}
+</style>
+</head>
+<body data-tab="shift">
+<header>
+  <div class="logo"><div class="mark"></div><div><h1>移轴镜头模拟器</h1><small>Tilt-Shift Lens Simulator · 微缩景观 / 建筑透视</small></div></div>
+  <div class="tabs" id="tabs">
+    <button data-tab="tilt">① 倾斜 Tilt · 微缩虚化</button>
+    <button data-tab="shift" class="on">② 位移 Shift · 建筑透视</button>
+  </div>
+  <div class="spacer"></div>
+  <span class="tools tilt-only">
+  <button id="btnOpen">📂 打开图片</button>
+  <button id="btnSample">🏙️ 示例场景</button>
+  <button id="btnCompare" title="按住查看原图（或按住空格键）">👁 按住对比</button>
+  <button id="btnReset">↺ 重置</button>
+  <button id="btnExport" class="primary">⬇ 导出 PNG</button>
+  </span>
+  <span class="tools shift-only">
+  <button id="shReset">↺ 重置</button>
+  <button id="shToTilt" title="把当前 3D 画面作为素材，送入倾斜虚化模块">✨ 发送到微缩虚化</button>
+  <button id="shExport" class="primary">⬇ 导出 PNG</button>
+  </span>
+  <input type="file" id="file" accept="image/*" hidden>
+</header>
+<main>
+  <div id="stage">
+    <canvas id="shiftCanvas" class="shift-only"></canvas>
+    <div id="shHint" class="shift-only"><b>拖动画面</b> 移动镜头（Shift） · <b>滚轮</b> 变焦 · <b>Shift+滚轮</b> 前后移动相机</div>
+    <div id="wrap" class="tilt-only">
+      <canvas id="gl"></canvas>
+      <canvas id="overlay"></canvas>
+      <div id="badge">原图</div>
+    </div>
+    <div id="hint" class="tilt-only"><b>拖动</b> 移动焦点 · <b>Shift+拖动</b> 旋转 · <b>滚轮</b> 清晰带宽度 · <b>空格</b> 对比原图 · 可拖入/粘贴图片</div>
+    <div id="drop">松开鼠标以载入图片</div>
+    <div id="err">您的浏览器不支持 WebGL，无法运行本模拟器。</div>
+  </div>
+  <aside>
+  <div id="panelShift" class="shift-only">
+    <section>
+      <h2>对比视图</h2>
+      <div class="seg seg3" id="shViewSeg">
+        <button data-v="single" class="on">单画面</button>
+        <button data-v="pitch">上仰 vs 位移</button>
+        <button data-v="compress">近广角 vs 远长焦</button>
+      </div>
+      <div class="info" id="shViewNote"></div>
+    </section>
+    <section>
+      <h2>镜头位移 Shift <span class="sub">相机保持水平</span></h2>
+      <div id="sg-shift"></div>
+      <div class="chips">
+        <button data-q="level">水平 · 不移轴</button>
+        <button data-q="pitch">相机上仰取景</button>
+        <button data-q="shift">水平 + 镜头上移</button>
+      </div>
+      <canvas id="circleView"></canvas>
+    </section>
+    <section>
+      <h2>相机姿态</h2>
+      <div id="sg-pose"></div>
+    </section>
+    <section>
+      <h2>距离与焦距 <span class="sub">透视压缩</span></h2>
+      <div id="sg-lens"></div>
+      <label class="chk" style="margin-bottom:10px"><input type="checkbox" id="shLock"> 锁定主体大小（移动时自动变焦）</label>
+      <button id="shDolly" style="width:100%">▶ 演示：后退 + 换长焦（希区柯克变焦）</button>
+    </section>
+    <section>
+      <h2>侧视图 <span class="sub">传感器平面与视锥</span></h2>
+      <canvas id="sideView"></canvas>
+      <div class="info" id="shStats"></div>
+    </section>
+    <section>
+      <h2>显示</h2>
+      <label class="chk"><input type="checkbox" id="shGuides" checked> 垂直参考线 / 建筑边线延长</label>
+      <label class="chk" style="margin-top:8px"><input type="checkbox" id="shCircle" checked> 显示镜头像场圈（Ø67mm）</label>
+      <label class="chk" style="margin-top:8px"><input type="checkbox" id="shGrid" checked> 地面网格</label>
+    </section>
+    <section>
+      <h2>原理</h2>
+      <div class="tips">
+        <b>为什么楼会“倒”？</b> 相机上仰时传感器不再与建筑立面平行，越高处离传感器越远、成像越小，竖线因此向上汇聚（梯形畸变）。<br>
+        <b>Shift 怎么解决？</b> 相机保持水平（传感器 ∥ 立面），只把镜头相对传感器上移，相当于从更大的像场圈里“裁”出上半部分——竖线保持竖直。<br>
+        <b>透视压缩</b>：透视只由<b>拍摄位置</b>决定。退远后远近物体的距离比趋近 1，所以背景显得更大、更贴近主体；长焦只是把主体重新放大到画面里。
+      </div>
+    </section>
+  </div>
+  <div id="panelTilt" class="tilt-only">
+    <section>
+      <h2>预设风格</h2>
+      <div class="chips" id="presets"></div>
+    </section>
+    <section>
+      <h2>对焦区域</h2>
+      <div class="seg" id="modeSeg">
+        <button data-m="linear" class="on">▤ 线性移轴</button>
+        <button data-m="radial">◎ 径向焦点</button>
+      </div>
+      <div id="g-focus"></div>
+    </section>
+    <section>
+      <h2>镜头参数 <span style="font-weight:400;letter-spacing:0">沙姆定律示意</span></h2>
+      <div id="g-lens"></div>
+      <canvas id="diagram"></canvas>
+      <div class="info" id="info"></div>
+    </section>
+    <section>
+      <h2>色彩与氛围</h2>
+      <div id="g-color"></div>
+    </section>
+    <section>
+      <h2>显示</h2>
+      <label class="chk"><input type="checkbox" id="chkGuides"> 始终显示对焦参考线</label>
+    </section>
+    <section>
+      <h2>操作提示</h2>
+      <div class="tips">
+        <kbd>拖动画面</kbd> 将焦点移到指定位置<br>
+        <kbd>Shift</kbd> + 拖动 / 拖动圆形手柄：旋转对焦带<br>
+        <kbd>滚轮</kbd> 调整清晰带宽度，<kbd>Shift</kbd>+滚轮 调整过渡<br>
+        <kbd>空格</kbd> 按住对比原图 · 双击参数名恢复默认<br>
+        小技巧：选择<b>高处俯拍</b>的照片效果最佳，提高饱和度更有“玩具感”。
+      </div>
+    </section>
+  </div>
+  </aside>
+</main>
+
+<script>
+(() => {
+const $ = s => document.querySelector(s);
+const FSTOPS = [1.4, 2, 2.8, 4, 5.6, 8, 11, 16, 22];
+const DEFAULTS = { mode:'linear', cx:0.5, cy:0.58, angle:0, width:14, trans:14, ellipse:1.6,
+  tilt:6, fIdx:1, bokeh:40, sat:140, con:114, bri:104, vig:25, grain:6 };
+const S = { ...DEFAULTS };
+const PRESETS = [
+  { name:'微缩城市', p:{ mode:'linear', angle:0, width:14, trans:14, tilt:7, fIdx:1, bokeh:40, sat:150, con:116, bri:105, vig:22, grain:6 } },
+  { name:'柔和自然', p:{ mode:'linear', angle:0, width:24, trans:24, tilt:4, fIdx:4, bokeh:20, sat:115, con:106, bri:102, vig:12, grain:3 } },
+  { name:'极致微缩', p:{ mode:'linear', angle:0, width:8, trans:9, tilt:10, fIdx:0, bokeh:60, sat:175, con:126, bri:108, vig:32, grain:8 } },
+  { name:'斜向构图', p:{ mode:'linear', angle:-18, width:12, trans:14, tilt:7, fIdx:1, bokeh:40, sat:145, con:114, bri:104, vig:22 } },
+  { name:'径向焦点', p:{ mode:'radial', width:18, trans:20, ellipse:1.6, tilt:7, fIdx:1, bokeh:50, sat:135, con:112, bri:103, vig:30 } },
+  { name:'复古胶片', p:{ mode:'linear', angle:0, width:16, trans:16, tilt:6, fIdx:2, bokeh:30, sat:90, con:120, bri:100, vig:45, grain:22 } },
+];
+const SPEC = {
+  focus: [
+    { k:'cy', label:'对焦位置（纵向）', min:0, max:1, step:0.001, fmt:v=>Math.round(v*100)+'%' },
+    { k:'cx', label:'对焦位置（横向）', min:0, max:1, step:0.001, fmt:v=>Math.round(v*100)+'%' },
+    { k:'angle', label:'旋转角度', min:-90, max:90, step:1, fmt:v=>v+'°' },
+    { k:'width', label:'清晰带宽度', min:0, max:70, step:0.5, fmt:v=>v.toFixed(1)+'%' },
+    { k:'trans', label:'过渡柔和度', min:1, max:50, step:0.5, fmt:v=>v.toFixed(1)+'%' },
+    { k:'ellipse', label:'椭圆拉伸', min:1, max:4, step:0.05, fmt:v=>v.toFixed(2)+'×', radial:true },
+  ],
+  lens: [
+    { k:'tilt', label:'镜头倾角（反向）', min:0, max:10, step:0.1, fmt:v=>v.toFixed(1)+'°' },
+    { k:'fIdx', label:'光圈', min:0, max:8, step:1, fmt:v=>'f/'+FSTOPS[v] },
+    { k:'bokeh', label:'焦外高光增强', min:0, max:100, step:1, fmt:v=>v+'%' },
+  ],
+  color: [
+    { k:'sat', label:'饱和度', min:0, max:200, step:1, fmt:v=>v+'%' },
+    { k:'con', label:'对比度', min:50, max:160, step:1, fmt:v=>v+'%' },
+    { k:'bri', label:'亮度', min:60, max:150, step:1, fmt:v=>v+'%' },
+    { k:'vig', label:'暗角', min:0, max:100, step:1, fmt:v=>v+'%' },
+    { k:'grain', label:'胶片颗粒', min:0, max:40, step:1, fmt:v=>v },
+  ],
+};
+
+/* ---------------- WebGL ---------------- */
+const glc = $('#gl');
+const gl = glc.getContext('webgl', { preserveDrawingBuffer:true, alpha:false, antialias:false });
+if (!gl) { $('#err').style.display = 'flex'; return; }
+const MAXTEX = Math.min(gl.getParameter(gl.MAX_TEXTURE_SIZE), 4096);
+const MAX_EDGE = Math.min(2800, MAXTEX);
+
+const VS = `attribute vec2 p; varying vec2 uv; void main(){ uv=p*0.5+0.5; gl_Position=vec4(p,0.0,1.0); }`;
+const COMMON = `precision highp float; varying vec2 uv; uniform sampler2D tex; uniform vec2 size;
+float rnd(vec2 c){ return fract(sin(dot(c, vec2(12.9898,78.233)))*43758.5453); }`;
+const FS_BLUR = COMMON + `
+uniform vec2 center, dir, delta; uniform float halfW, trans, blur, mode, ellipse, gamma;
+void main(){
+  vec2 d = uv*size - center;
+  vec2 nrm = vec2(-dir.y, dir.x);
+  float along = dot(d, dir), across = dot(d, nrm);
+  float dist = mode < 0.5 ? abs(across) : length(vec2(along/ellipse, across));
+  float r = smoothstep(0.0, 1.0, (dist - halfW) / max(trans, 1.0)) * blur;
+  if (r < 0.35) { gl_FragColor = texture2D(tex, uv); return; }
+  float off = rnd(gl_FragCoord.xy);
+  vec3 acc = vec3(0.0); float tot = 0.0;
+  for (float t = -30.0; t <= 30.0; t += 1.0) {
+    float pc = (t + off - 0.5) / 30.0;
+    float w = 1.0 - abs(pc);
+    vec3 s = pow(texture2D(tex, uv + delta / size * pc * r).rgb, vec3(gamma));
+    acc += s * w; tot += w;
+  }
+  gl_FragColor = vec4(pow(acc / tot, vec3(1.0 / gamma)), 1.0);
+}`;
+const FS_COLOR = COMMON + `
+uniform float sat, con, bri, vig, grain;
+void main(){
+  vec3 c = texture2D(tex, uv).rgb * bri;
+  c = (c - 0.5) * con + 0.5;
+  float l = dot(c, vec3(0.299, 0.587, 0.114));
+  c = mix(vec3(l), c, sat);
+  vec2 q = uv - 0.5; float asp = size.x / size.y; q.x *= asp;
+  float r = length(q) / length(vec2(0.5*asp, 0.5));
+  c *= 1.0 - vig * 0.85 * smoothstep(0.3, 1.05, r);
+  c += (rnd(uv*size + 17.0) - 0.5) * grain;
+  gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
+}`;
+
+function shader(type, src) {
+  const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+function program(fs) {
+  const p = gl.createProgram();
+  gl.attachShader(p, shader(gl.VERTEX_SHADER, VS));
+  gl.attachShader(p, shader(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  const u = {}, n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+  for (let i = 0; i < n; i++) { const info = gl.getActiveUniform(p, i); u[info.name] = gl.getUniformLocation(p, info.name); }
+  return { p, u, a: gl.getAttribLocation(p, 'p') };
+}
+const progBlur = program(FS_BLUR), progColor = program(FS_COLOR);
+const quadBuf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+
+function makeTex(w, h, src) {
+  const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  if (src) {
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+  } else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  return t;
+}
+function makeFB(w, h) {
+  const tex = makeTex(w, h), fb = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  return { tex, fb };
+}
+function run(pr, tex, fb, uni) {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+  gl.useProgram(pr.p);
+  gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+  gl.enableVertexAttribArray(pr.a);
+  gl.vertexAttribPointer(pr.a, 2, gl.FLOAT, false, 0, 0);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tex);
+  if (pr.u.tex) gl.uniform1i(pr.u.tex, 0);
+  for (const k in uni) {
+    const l = pr.u[k]; if (!l) continue; const v = uni[k];
+    typeof v === 'number' ? gl.uniform1f(l, v) : gl.uniform2f(l, v[0], v[1]);
+  }
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+let W = 0, H = 0, srcTex = null, fbA = null, fbB = null, comparing = false, pending = false;
+function cleanupGL() {
+  [srcTex, fbA && fbA.tex, fbB && fbB.tex].forEach(t => t && gl.deleteTexture(t));
+  [fbA, fbB].forEach(f => f && gl.deleteFramebuffer(f.fb));
+}
+function setSource(img) {
+  const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+  const sc = Math.min(1, MAX_EDGE / Math.max(iw, ih));
+  W = Math.round(iw * sc); H = Math.round(ih * sc);
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  c.getContext('2d').drawImage(img, 0, 0, W, H);
+  cleanupGL();
+  srcTex = makeTex(W, H, c);
+  fbA = makeFB(W, H); fbB = makeFB(W, H);
+  glc.width = W; glc.height = H;
+  fit(); requestRender();
+}
+const blurPx = () => S.tilt * 5 * Math.sqrt(2.8 / FSTOPS[S.fIdx]) * H / 1000;
+
+function render() {
+  pending = false;
+  if (!srcTex) return;
+  gl.viewport(0, 0, W, H);
+  const base = { size:[W, H] };
+  if (comparing) { run(progColor, srcTex, null, { ...base, sat:1, con:1, bri:1, vig:0, grain:0 }); return; }
+  const a = S.angle * Math.PI / 180, dir = [Math.cos(a), -Math.sin(a)];
+  const u = { ...base, center:[S.cx * W, (1 - S.cy) * H], dir,
+    halfW: S.width / 200 * H, trans: S.trans / 100 * H, blur: blurPx(),
+    mode: S.mode === 'radial' ? 1 : 0, ellipse: S.ellipse, gamma: 1 + S.bokeh / 100 * 1.8 };
+  run(progBlur, srcTex, fbA.fb, { ...u, delta: dir });
+  run(progBlur, fbA.tex, fbB.fb, { ...u, delta: [-dir[1], dir[0]] });
+  run(progColor, fbB.tex, null, { ...base, sat:S.sat/100, con:S.con/100, bri:S.bri/100, vig:S.vig/100, grain:S.grain/400 });
+  updateInfo();
+}
+function requestRender() { if (!pending) { pending = true; requestAnimationFrame(render); } }
+
+/* ---------------- Layout & overlay ---------------- */
+const stage = $('#stage'), wrap = $('#wrap'), ov = $('#overlay'), octx = ov.getContext('2d');
+let cssW = 0, cssH = 0, hovering = false, dragging = null, flashUntil = 0;
+function fit() {
+  if (!W) return;
+  const r = stage.getBoundingClientRect();
+  const s = Math.min((r.width - 48) / W, (r.height - 70) / H);
+  cssW = Math.max(50, Math.floor(W * s)); cssH = Math.max(50, Math.floor(H * s));
+  wrap.style.width = cssW + 'px'; wrap.style.height = cssH + 'px';
+  const d = devicePixelRatio || 1;
+  ov.width = cssW * d; ov.height = cssH * d;
+  drawOverlay();
+}
+new ResizeObserver(fit).observe(stage);
+
+function drawOverlay() {
+  const d = devicePixelRatio || 1, g = octx;
+  g.setTransform(d, 0, 0, d, 0, 0); g.clearRect(0, 0, cssW, cssH);
+  const show = !comparing && ($('#chkGuides').checked || hovering || dragging || performance.now() < flashUntil);
+  if (!show) return;
+  const cx = S.cx * cssW, cy = S.cy * cssH, a = S.angle * Math.PI / 180;
+  const hw = S.width / 200 * cssH, tr = S.trans / 100 * cssH, L = Math.hypot(cssW, cssH) * 1.5;
+  g.save(); g.translate(cx, cy); g.rotate(a);
+  g.shadowColor = 'rgba(0,0,0,.6)'; g.shadowBlur = 3;
+  if (S.mode === 'linear') {
+    g.fillStyle = 'rgba(245,181,68,.07)'; g.fillRect(-L, -hw, 2 * L, 2 * hw);
+    g.strokeStyle = 'rgba(255,255,255,.9)'; g.lineWidth = 1.5; g.setLineDash([]);
+    [-hw, hw].forEach(y => { g.beginPath(); g.moveTo(-L, y); g.lineTo(L, y); g.stroke(); });
+    g.strokeStyle = 'rgba(255,255,255,.5)'; g.lineWidth = 1; g.setLineDash([6, 6]);
+    [-hw - tr, hw + tr].forEach(y => { g.beginPath(); g.moveTo(-L, y); g.lineTo(L, y); g.stroke(); });
+    g.strokeStyle = 'rgba(245,181,68,.5)'; g.setLineDash([2, 6]);
+    g.beginPath(); g.moveTo(-L, 0); g.lineTo(L, 0); g.stroke();
+  } else {
+    g.fillStyle = 'rgba(245,181,68,.07)'; g.strokeStyle = 'rgba(255,255,255,.9)'; g.lineWidth = 1.5;
+    g.beginPath(); g.ellipse(0, 0, Math.max(1, hw * S.ellipse), Math.max(1, hw), 0, 0, Math.PI * 2); g.fill(); g.stroke();
+    g.strokeStyle = 'rgba(255,255,255,.5)'; g.lineWidth = 1; g.setLineDash([6, 6]);
+    g.beginPath(); g.ellipse(0, 0, (hw + tr) * S.ellipse, hw + tr, 0, 0, Math.PI * 2); g.stroke();
+  }
+  g.setLineDash([]);
+  // rotate handle
+  const rh = rotHandleDist();
+  g.strokeStyle = 'rgba(255,255,255,.7)'; g.lineWidth = 1;
+  g.beginPath(); g.moveTo(10, 0); g.lineTo(rh - 7, 0); g.stroke();
+  g.fillStyle = '#5cc8ff'; g.beginPath(); g.arc(rh, 0, 6, 0, Math.PI * 2); g.fill();
+  // center handle
+  g.fillStyle = '#f5b544'; g.strokeStyle = '#fff'; g.lineWidth = 2;
+  g.beginPath(); g.arc(0, 0, 7, 0, Math.PI * 2); g.fill(); g.stroke();
+  g.restore();
+}
+const rotHandleDist = () => Math.min(90, cssW * 0.15);
+function flash() { flashUntil = performance.now() + 1200; drawOverlay(); clearTimeout(flash.t); flash.t = setTimeout(drawOverlay, 1250); }
+
+/* ---------------- Interaction ---------------- */
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+function localPos(e) { const r = ov.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
+ov.addEventListener('pointerenter', () => { hovering = true; drawOverlay(); });
+ov.addEventListener('pointerleave', () => { hovering = false; drawOverlay(); });
+ov.addEventListener('pointerdown', e => {
+  ov.setPointerCapture(e.pointerId);
+  const [x, y] = localPos(e), a = S.angle * Math.PI / 180, rh = rotHandleDist();
+  const hx = S.cx * cssW + Math.cos(a) * rh, hy = S.cy * cssH + Math.sin(a) * rh;
+  dragging = (e.shiftKey || Math.hypot(x - hx, y - hy) < 12) ? 'rotate' : 'move';
+  onDrag(e);
+});
+ov.addEventListener('pointermove', e => { if (dragging) onDrag(e); });
+ov.addEventListener('pointerup', () => { dragging = null; drawOverlay(); });
+function onDrag(e) {
+  const [x, y] = localPos(e);
+  if (dragging === 'move') { S.cx = clamp(x / cssW, 0, 1); S.cy = clamp(y / cssH, 0, 1); }
+  else {
+    let deg = Math.atan2(y - S.cy * cssH, x - S.cx * cssW) * 180 / Math.PI;
+    if (deg > 90) deg -= 180; if (deg < -90) deg += 180;
+    S.angle = Math.round(deg);
+  }
+  syncUI(); requestRender(); drawOverlay();
+}
+ov.addEventListener('wheel', e => {
+  e.preventDefault();
+  const k = e.shiftKey ? 'trans' : 'width', sp = SPEC.focus.find(s => s.k === k);
+  S[k] = clamp(S[k] - Math.sign(e.deltaY || e.deltaX) * 1, sp.min, sp.max);
+  syncUI(); requestRender(); flash();
+}, { passive:false });
+
+function setCompare(v) {
+  if (comparing === v) return;
+  comparing = v; $('#badge').style.display = v ? 'block' : 'none';
+  $('#btnCompare').classList.toggle('active', v);
+  requestRender(); drawOverlay();
+}
+const bc = $('#btnCompare');
+bc.addEventListener('pointerdown', () => setCompare(true));
+['pointerup', 'pointerleave'].forEach(t => bc.addEventListener(t, () => setCompare(false)));
+addEventListener('keydown', e => { if (document.body.dataset.tab !== 'tilt') return; if (e.code === 'Space' && e.target.tagName !== 'INPUT' || e.code === 'Space' && e.target.type === 'range') { e.preventDefault(); setCompare(true); } });
+addEventListener('keyup', e => { if (e.code === 'Space') setCompare(false); });
+
+/* ---------------- Controls ---------------- */
+const inputs = {};
+function buildGroup(id, list, section) {
+  const root = $('#g-' + id);
+  list.forEach(sp => {
+    const div = document.createElement('div'); div.className = 'ctl'; div.dataset.k = sp.k;
+    div.innerHTML = `<div class="row" title="双击恢复默认值"><span>${sp.label}</span><span class="val"></span></div>
+      <input type="range" min="${sp.min}" max="${sp.max}" step="${sp.step}">`;
+    const inp = div.querySelector('input');
+    inp.addEventListener('input', () => {
+      S[sp.k] = parseFloat(inp.value); syncUI(); requestRender();
+      if (section === 'focus') flash();
+    });
+    div.querySelector('.row').addEventListener('dblclick', () => { S[sp.k] = DEFAULTS[sp.k]; syncUI(); requestRender(); });
+    inputs[sp.k] = { inp, val: div.querySelector('.val'), sp, div };
+    root.appendChild(div);
+  });
+}
+buildGroup('focus', SPEC.focus, 'focus');
+buildGroup('lens', SPEC.lens, 'lens');
+buildGroup('color', SPEC.color, 'color');
+
+function syncUI() {
+  for (const k in inputs) {
+    const { inp, val, sp, div } = inputs[k];
+    inp.value = S[k];
+    inp.style.setProperty('--p', ((S[k] - sp.min) / (sp.max - sp.min) * 100) + '%');
+    val.textContent = sp.fmt(S[k]);
+    if (sp.radial) div.classList.toggle('hide', S.mode !== 'radial');
+  }
+  inputs.cx.div.classList.toggle('hide', S.mode !== 'radial' && false);
+  document.querySelectorAll('#modeSeg button').forEach(b => b.classList.toggle('on', b.dataset.m === S.mode));
+  drawDiagram(); updateInfo();
+}
+document.querySelectorAll('#modeSeg button').forEach(b => b.addEventListener('click', () => {
+  S.mode = b.dataset.m; syncUI(); requestRender(); flash();
+}));
+const pc = $('#presets');
+PRESETS.forEach(pr => {
+  const b = document.createElement('button'); b.textContent = pr.name;
+  b.onclick = () => { Object.assign(S, pr.p); syncUI(); requestRender(); flash();
+    pc.querySelectorAll('button').forEach(x => x.classList.toggle('active', x === b)); };
+  pc.appendChild(b);
+});
+$('#chkGuides').addEventListener('change', drawOverlay);
+$('#btnReset').onclick = () => { Object.assign(S, DEFAULTS); syncUI(); requestRender(); flash(); pc.querySelectorAll('button').forEach(x => x.classList.remove('active')); };
+function updateInfo() {
+  $('#info').innerHTML = `等效模糊半径 ≈ <b style="color:#e7e9ef">${blurPx().toFixed(0)} px</b> ｜ 处理分辨率 ${W}×${H}<br>
+    反向倾斜让合焦平面变陡，只有一条窄带清晰，大脑会误判为“近距离微距拍摄”，于是真实场景看起来像模型。`;
+}
+
+/* ---------------- Scheimpflug diagram ---------------- */
+function drawDiagram() {
+  const c = $('#diagram'), d = devicePixelRatio || 1, w = c.clientWidth, h = c.clientHeight;
+  if (!w) return;
+  if (c.width !== w * d) { c.width = w * d; c.height = h * d; }
+  const g = c.getContext('2d'); g.setTransform(d, 0, 0, d, 0, 0); g.clearRect(0, 0, w, h);
+  const line = (x1, y1, x2, y2) => { g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke(); };
+  const ay = h * 0.42, sx = 28, lx = 96, fx = w - 54;
+  const th = S.tilt * 3 * Math.PI / 180;           // 示意放大 3 倍
+  const fn = FSTOPS[S.fIdx], dof = 4 + fn * 2.2;
+  g.lineWidth = 1;
+  g.strokeStyle = 'rgba(255,255,255,.16)'; g.setLineDash([3, 4]);
+  line(0, ay, w, ay); line(sx, 0, sx, h);
+  g.strokeStyle = 'rgba(92,200,255,.4)';
+  line(lx + Math.sin(th) * 999, ay - Math.cos(th) * 999, lx - Math.sin(th) * 999, ay + Math.cos(th) * 999);
+  g.setLineDash([]);
+  const hy = th > 1e-4 ? ay + (lx - sx) / Math.tan(th) : Infinity;
+  const ext = px => { const dx = px - sx, dy = ay - hy, k = 5000 / Math.hypot(dx, dy); return [sx + dx * k, hy + dy * k]; };
+  g.save(); g.beginPath(); g.rect(lx + 14, 0, w, h); g.clip();
+  g.fillStyle = 'rgba(245,181,68,.15)'; g.strokeStyle = '#f5b544'; g.lineWidth = 2;
+  if (isFinite(hy)) {
+    const a = ext(fx - dof), b = ext(fx + dof), m = ext(fx);
+    g.beginPath(); g.moveTo(sx, hy); g.lineTo(...a); g.lineTo(...b); g.closePath(); g.fill();
+    line(sx, hy, m[0], m[1]);
+  } else {
+    g.fillRect(fx - dof, 0, dof * 2, h); line(fx, 0, fx, h);
+  }
+  g.restore();
+  // light rays
+  g.strokeStyle = 'rgba(255,255,255,.25)'; g.lineWidth = 1;
+  [[-24], [24]].forEach(([o]) => { line(fx, ay, lx, ay + o * Math.cos(th)); line(lx, ay + o * Math.cos(th), sx, ay); });
+  if (isFinite(hy) && hy < h - 8) {
+    g.fillStyle = '#ff6b6b'; g.beginPath(); g.arc(sx, hy, 3.5, 0, Math.PI * 2); g.fill();
+    g.font = '11px "Microsoft YaHei",sans-serif'; g.fillText('沙姆交点', sx + 7, hy + 4);
+  }
+  g.strokeStyle = '#cfd6e4'; g.lineWidth = 4; line(sx, ay - 26, sx, ay + 26);
+  g.save(); g.translate(lx, ay); g.rotate(th);
+  g.fillStyle = 'rgba(92,200,255,.25)'; g.strokeStyle = '#5cc8ff'; g.lineWidth = 1.5;
+  g.beginPath(); g.ellipse(0, 0, 6, 30, 0, 0, Math.PI * 2); g.fill(); g.stroke(); g.restore();
+  g.fillStyle = '#8a92a6'; g.font = '11px "Microsoft YaHei",sans-serif';
+  g.fillText('传感器', sx - 16, ay - 32); g.fillText('镜头', lx - 11, ay - 38);
+  g.fillStyle = '#f5b544'; g.fillText('合焦平面 / 景深楔', fx - 64, 14);
+  g.fillStyle = '#8a92a6';
+  g.fillText(`倾角 ${S.tilt.toFixed(1)}° · f/${fn}（角度放大3倍示意）`, 8, h - 8);
+}
+
+/* ---------------- Image loading ---------------- */
+function loadFile(f) {
+  if (!f || !f.type.startsWith('image/')) return;
+  const url = URL.createObjectURL(f), img = new Image();
+  img.onload = () => { setSource(img); URL.revokeObjectURL(url); };
+  img.onerror = () => alert('无法读取该图片文件。');
+  img.src = url;
+}
+$('#btnOpen').onclick = () => $('#file').click();
+$('#file').onchange = e => { loadFile(e.target.files[0]); e.target.value = ''; };
+$('#btnSample').onclick = () => setSource(makeSample());
+let dragDepth = 0;
+addEventListener('dragenter', e => { e.preventDefault(); dragDepth++; $('#drop').style.display = 'flex'; });
+addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; $('#drop').style.display = 'none'; } });
+addEventListener('dragover', e => e.preventDefault());
+addEventListener('drop', e => { e.preventDefault(); dragDepth = 0; $('#drop').style.display = 'none'; loadFile(e.dataTransfer.files[0]); });
+addEventListener('paste', e => { const it = [...e.clipboardData.items].find(i => i.type.startsWith('image/')); if (it) loadFile(it.getAsFile()); });
+$('#btnExport').onclick = () => {
+  const wasCmp = comparing; comparing = false; render();
+  glc.toBlob(b => {
+    const a = document.createElement('a'); a.href = URL.createObjectURL(b);
+    a.download = `移轴微缩_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.png`;
+    a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    comparing = wasCmp;
+  }, 'image/png');
+};
+
+/* ---------------- Procedural sample: aerial city ---------------- */
+function makeSample() {
+  const w = 1800, h = 1200, c = document.createElement('canvas'); c.width = w; c.height = h;
+  const g = c.getContext('2d');
+  let seed = 20261005; const R = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const pick = a => a[Math.floor(R() * a.length)];
+  const hz = h * 0.1, f = w * 0.95, Hc = 34, cx = w / 2;
+  const P = (X, Y, Z) => [cx + f * X / Z, hz + f * (Hc - Y) / Z];
+  const sky = [205, 222, 236];
+  const fogK = Z => 1 - Math.exp(-Z / 1100);
+  const fog = (col, Z) => { const k = fogK(Z); return `rgb(${col.map((v, i) => Math.round(v + (sky[i] - v) * k)).join(',')})`; };
+  const shade = (col, k) => col.map(v => Math.min(255, v * k));
+  const poly = (pts, fill) => { g.fillStyle = fill; g.beginPath(); g.moveTo(...pts[0]); for (let i = 1; i < pts.length; i++) g.lineTo(...pts[i]); g.closePath(); g.fill(); };
+  const groundRect = (x0, x1, z0, z1, col) => poly([P(x0,0,z0), P(x1,0,z0), P(x1,0,z1), P(x0,0,z1)], fog(col, (z0 + z1) / 2));
+
+  let gr = g.createLinearGradient(0, 0, 0, hz); gr.addColorStop(0, '#8db6dc'); gr.addColorStop(1, '#d8e6f1');
+  g.fillStyle = gr; g.fillRect(0, 0, w, hz + 2);
+  g.fillStyle = '#aebfcd'; g.beginPath(); g.moveTo(0, hz + 1);
+  for (let x = 0; x <= w; x += 15) g.lineTo(x, hz - 16 - 12 * Math.sin(x / 140) - 7 * Math.sin(x / 45 + 1));
+  g.lineTo(w, hz + 1); g.fill();
+  const asphalt = [86, 90, 97];
+  gr = g.createLinearGradient(0, hz, 0, h);
+  gr.addColorStop(0, fog(asphalt, 3000)); gr.addColorStop(0.12, fog(asphalt, 450)); gr.addColorStop(0.4, fog(asphalt, 110)); gr.addColorStop(1, fog(asphalt, 40));
+  g.fillStyle = gr; g.fillRect(0, hz, w, h - hz);
+
+  const B = 50, Z0 = 12, ZMAX = 1700;
+  const walls = [[238,230,216],[216,198,172],[190,206,218],[234,202,182],[202,216,192],[244,240,232],[184,174,164],[226,190,146],[206,186,210]];
+  const roofs = [[122,130,140],[172,88,72],[98,124,98],[204,204,200],[152,152,158],[86,112,142],[214,170,110]];
+  const cars = [[220,40,40],[250,200,30],[40,110,220],[245,245,245],[30,170,160],[245,130,30],[30,30,36]];
+  const grass = [104,152,78], walk = [198,194,186];
+  const visible = (x0, x1, z) => { const m = (w / 2 + 60) * z / f; return x1 > -m && x0 < m; };
+  const objs = [], shadows = [];
+
+  function box(x0, x1, z0, z1, hgt, col, roof, windows) {
+    objs.push({ z: z0, x: Math.abs((x0 + x1) / 2), draw() {
+      const Z = (z0 + z1) / 2;
+      if (x0 > 0) poly([P(x0,0,z0), P(x0,0,z1), P(x0,hgt,z1), P(x0,hgt,z0)], fog(shade(col, 0.95), Z));
+      else if (x1 < 0) poly([P(x1,0,z0), P(x1,0,z1), P(x1,hgt,z1), P(x1,hgt,z0)], fog(shade(col, 0.62), Z));
+      poly([P(x0,0,z0), P(x1,0,z0), P(x1,hgt,z0), P(x0,hgt,z0)], fog(shade(col, 0.82), z0));
+      if (windows && f * 3 / z0 > 5) {
+        const wc = fog([70, 92, 120], z0);
+        for (let y = 2; y < hgt - 1.5; y += 3) for (let x = x0 + 1.2; x < x1 - 1.6; x += 2.6)
+          poly([P(x,y,z0), P(x+1.3,y,z0), P(x+1.3,y+1.6,z0), P(x,y+1.6,z0)], wc);
+      }
+      poly([P(x0,hgt,z0), P(x1,hgt,z0), P(x1,hgt,z1), P(x0,hgt,z1)], fog(roof, Z));
+    }});
+    const dx = hgt * 0.55, dz = hgt * 0.5;
+    shadows.push({ z: (z0 + z1) / 2, pts: [[x0,z0],[x1,z0],[x1+dx,z0+dz],[x1+dx,z1+dz],[x0+dx,z1+dz],[x0,z1]] });
+  }
+  function tree(X, Z, r) {
+    const col = pick([[70,128,60],[88,146,64],[60,112,58],[110,150,70]]);
+    objs.push({ z: Z - r, x: Math.abs(X), draw() {
+      const [bx, by] = P(X, 0, Z), [tx, ty] = P(X, 2.6 + r * 0.8, Z), pr = f * r / Z;
+      g.strokeStyle = fog([96, 72, 52], Z); g.lineWidth = Math.max(1, f * 0.35 / Z);
+      g.beginPath(); g.moveTo(bx, by); g.lineTo(tx, ty); g.stroke();
+      g.fillStyle = fog(col, Z); g.beginPath(); g.arc(tx, ty, pr, 0, Math.PI * 2); g.fill();
+      g.fillStyle = fog(shade(col, 1.25), Z); g.beginPath(); g.arc(tx - pr * 0.3, ty - pr * 0.3, pr * 0.5, 0, Math.PI * 2); g.fill();
+    }});
+    shadows.push({ z: Z, pts: [[X-r*0.6,Z-r*0.4],[X+r*1.6,Z],[X+r*1.6,Z+r*1.4],[X-r*0.2,Z+r*1.2]] });
+  }
+
+  for (let k = 0; Z0 + k * B < ZMAX; k++) {
+    const bz0 = Z0 + k * B + 5, bz1 = Z0 + (k + 1) * B - 5;
+    for (let m = -20; m < 20; m++) {
+      const bx0 = m * B + 5, bx1 = (m + 1) * B - 5;
+      if (!visible(bx0, bx1, bz1)) continue;
+      const park = R() < 0.14;
+      groundRect(bx0, bx1, bz0, bz1, walk);
+      if (park) {
+        groundRect(bx0 + 2, bx1 - 2, bz0 + 2, bz1 - 2, grass);
+        if (R() < 0.5) { groundRect(bx0 + 2, bx1 - 2, (bz0 + bz1) / 2 - 1.2, (bz0 + bz1) / 2 + 1.2, [214, 196, 160]); }
+        const n = 6 + Math.floor(R() * 8);
+        for (let i = 0; i < n; i++) tree(bx0 + 5 + R() * 30, bz0 + 5 + R() * 30, 2 + R() * 1.8);
+      } else {
+        groundRect(bx0 + 1.5, bx1 - 1.5, bz0 + 1.5, bz1 - 1.5, [176, 172, 166]);
+        const big = R() < 0.18;
+        const lots = big ? [[0, 0, 2, 2]] : [[0, 0, 1, 1], [1, 0, 1, 1], [0, 1, 1, 1], [1, 1, 1, 1]];
+        lots.forEach(([i, j, si, sj]) => {
+          if (!big && R() < 0.1) { tree(bx0 + i * 20 + 10, bz0 + j * 20 + 10, 2.4); return; }
+          const x0 = bx0 + 2 + i * 19, z0 = bz0 + 2 + j * 19;
+          const x1 = x0 + si * 19 - 2 - R() * 3, z1 = z0 + sj * 19 - 2 - R() * 3;
+          const hgt = big ? 10 + R() * 18 : 3 + Math.pow(R(), 2) * 20;
+          const roof = pick(roofs);
+          box(x0, x1, z0, z1, hgt, pick(walls), roof, true);
+          if (hgt > 9 && R() < 0.6) { const ux = x0 + 2 + R() * (x1 - x0 - 6); const uz = z0 + 2 + R() * (z1 - z0 - 6);
+            box(ux, ux + 3, uz, uz + 3, hgt + 1.6, [200, 200, 204], [170, 170, 176], false); }
+        });
+        for (let t = bx0 + 3; t < bx1 - 2; t += 8) if (R() < 0.45) tree(t, bz0 + 0.6, 1.5);
+      }
+    }
+    const rz = Z0 + k * B;
+    for (let x = -1000; x < 1000; x += 9) if (visible(x, x + 4, rz)) groundRect(x, x + 4, rz - 0.25, rz + 0.25, [232, 226, 200]);
+    for (let m = -20; m < 20; m++) {
+      const X = m * B; if (!visible(X - 5, X + 5, rz + B)) continue;
+      for (let z = rz + 6; z < rz + B - 6; z += 9) groundRect(X - 0.25, X + 0.25, z, z + 4, [232, 226, 200]);
+      if (R() < 0.75) { const z = rz + 7 + R() * 30, L = R() < 0.5 ? -2.4 : 2.4;
+        box(X + L - 0.9, X + L + 0.9, z, z + 4, 1.4, pick(cars), shade(pick(cars), 1), false); }
+      if (R() < 0.6) { const xx = X + 7 + R() * 30, L = R() < 0.5 ? -2.4 : 2.4;
+        box(xx, xx + 4, rz + L - 0.9, rz + L + 0.9, 1.4, pick(cars), shade(pick(cars), 1), false); }
+    }
+  }
+  shadows.forEach(s => {
+    const a = 0.26 * (1 - fogK(s.z));
+    poly(s.pts.map(([x, z]) => P(x, 0, z)), `rgba(20,24,30,${a.toFixed(3)})`);
+  });
+  objs.sort((a, b) => b.z - a.z || b.x - a.x).forEach(o => o.draw());
+  return c;
+}
+
+/* ---------------- Init ---------------- */
+syncUI();
+setSource(makeSample());
+window.TiltApp = { setSource, refresh() { fit(); drawDiagram(); requestRender(); } };
+})();
+</script>
+
+<script>
+/* =====================================================================
+   位移 Shift · 建筑透视实验室
+   真实针孔相机模型：相机位置 + 姿态（俯仰/水平转动）+ 焦距 + 镜头位移（离轴投影）
+   ===================================================================== */
+(() => {
+const $ = s => document.querySelector(s);
+const DEG = Math.PI / 180, SW = 36, CIRCLE_R = 33.6, NORMAL_R = 21.65, NEAR = 0.3;
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const SH_DEF = { D:110, f:24, camH:1.6, camX:0, shiftX:0, shiftY:10, pitch:0, yaw:0 };
+const SH = { ...SH_DEF };
+let view = 'single', lockRatio = null, lastShift = 10, lastVps = [], dolly = null;
+
+/* ---------- 场景 ---------- */
+const scene = (() => {
+  let seed = 99; const R = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const boxes = [], trees = [];
+  const B = (x0, x1, z0, z1, y1, col, o = {}) => boxes.push({ x0, x1, y0: o.y0 || 0, y1, z0, z1, col, grid: o.grid });
+  B(-20, 20, 0, 24, 90, [224,214,196], { grid:[3.6, 4] });          // 主楼
+  B(-14, 14, 4, 20, 98, [206,197,182], { y0:90, grid:[2.6, 3.5] });
+  B(-0.5, 0.5, 11, 13, 116, [180,180,186], { y0:98 });
+  B(-8, 8, -3, 0, 4.5, [118,108,98]);                               // 入口雨棚
+  B(-60, -26, 2, 30, 42, [190,166,142], { grid:[3.2, 3.5] });
+  B(26, 60, -2, 26, 58, [166,182,198], { grid:[3.4, 3] });
+  B(-104, -66, 0, 28, 26, [214,190,160], { grid:[3.2, 4] });
+  B(66, 108, 4, 32, 34, [200,204,196], { grid:[3.3, 4] });
+  B(-150, -110, -4, 30, 64, [176,186,200], { grid:[3.5, 4] });
+  B(114, 160, 0, 34, 48, [226,206,186], { grid:[3.3, 4] });
+  B(-46, -12, 50, 80, 128, [150,164,180], { grid:[3.6, 4] });
+  B(30, 64, 60, 90, 104, [196,180,166], { grid:[3.5, 4] });
+  for (let i = 0; i < 110; i++) {                                    // 远景城市
+    const z = 260 + R() * 900, x = (R() - 0.5) * 2 * (300 + z * 0.9);
+    const w = 16 + R() * 40, d = 16 + R() * 30, h = 30 + Math.pow(R(), 1.6) * 210;
+    if (Math.abs(x) < 70 && z < 420) continue;
+    B(x - w / 2, x + w / 2, z, z + d, h, [150 + R() * 70, 150 + R() * 60, 150 + R() * 60].map(Math.round), { grid: h > 60 ? [4, 5] : null });
+  }
+  B(-164, -156, 1500, 1508, 300, [204,204,210]);                     // 电视塔
+  B(-174, -146, 1490, 1518, 246, [228,122,92], { y0:226 });
+  B(-160.6, -159.4, 1503, 1505, 360, [225,225,225], { y0:300 });
+  for (let z = -14; z > -1000; z -= 18) for (const s of [-1, 1]) {   // 路灯
+    const x = s * 13;
+    B(x - 0.15, x + 0.15, z - 0.15, z + 0.15, 6, [60,64,72]);
+    B(x - s * 1.1 - 0.45, x - s * 1.1 + 0.45, z - 0.25, z + 0.25, 6.25, [246,236,200], { y0:5.9 });
+  }
+  const tc = [[74,128,62],[90,140,66],[66,116,60]];
+  for (let z = -23; z > -1000; z -= 18) for (const s of [-1, 1]) trees.push({ x: s * 19, z, r: 2.6 + R() * 0.8, h: 3 + R() * 1.2, col: tc[R() * 3 | 0] });
+  const pc = [[200,60,60],[50,90,170],[230,190,60],[40,40,46],[240,240,240],[60,150,120]];
+  for (let i = 0; i < 26; i++) {                                     // 行人（尺度参照）
+    const x = (R() - 0.5) * 34, z = -4 - R() * 30;
+    B(x - 0.25, x + 0.25, z - 0.17, z + 0.17, 1.65 + R() * 0.2, pc[R() * pc.length | 0]);
+  }
+  const ridge = [];
+  for (let x = -16000; x <= 16000; x += 400)
+    ridge.push([x, 520 + 380 * Math.sin(x / 2300 + 1) + 260 * Math.sin(x / 900) + 180 * Math.sin(x / 370 + 2) + (Math.abs(x) < 3000 ? 300 : 0)]);
+  return { boxes, trees, ridge };
+})();
+
+/* ---------- 相机与投影 ---------- */
+function makeCam(o) {
+  const th = o.pitch * DEG, ps = o.yaw * DEG;
+  return { ...o, C: [o.camX, o.camH, -o.D],
+    F: [Math.sin(ps) * Math.cos(th), Math.sin(th), Math.cos(ps) * Math.cos(th)],
+    R: [Math.cos(ps), 0, -Math.sin(ps)],
+    U: [-Math.sin(ps) * Math.sin(th), Math.cos(th), -Math.cos(ps) * Math.sin(th)] };
+}
+function toCam(c, p) {
+  const dx = p[0] - c.C[0], dy = p[1] - c.C[1], dz = p[2] - c.C[2];
+  return [dx * c.R[0] + dy * c.R[1] + dz * c.R[2], dx * c.U[0] + dy * c.U[1] + dz * c.U[2], dx * c.F[0] + dy * c.F[1] + dz * c.F[2]];
+}
+// 离轴投影：镜头位移 = 取景框中心在像平面上相对光轴的偏移（mm）
+function proj(c, vp, v) {
+  const sx = c.f * v[0] / v[2] - c.shiftX, sy = c.f * v[1] / v[2] - c.shiftY;
+  return [vp.cx + sx * vp.k, vp.cy - sy * vp.k];
+}
+function clipNear(poly) {
+  const out = [];
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i], b = poly[(i + 1) % poly.length], ai = a[2] >= NEAR, bi = b[2] >= NEAR;
+    if (ai) out.push(a);
+    if (ai !== bi) { const t = (NEAR - a[2]) / (b[2] - a[2]); out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, NEAR]); }
+  }
+  return out;
+}
+function drawPoly(g, c, vp, pts, fill, stroke) {
+  const cp = clipNear(pts.map(p => toCam(c, p)));
+  if (cp.length < 3) return;
+  g.beginPath();
+  cp.forEach((v, i) => { const [x, y] = proj(c, vp, v); i ? g.lineTo(x, y) : g.moveTo(x, y); });
+  g.closePath(); g.fillStyle = fill; g.fill();
+  if (stroke) { g.strokeStyle = stroke; g.stroke(); }
+}
+function seg(g, c, vp, a, b) {
+  let A = toCam(c, a), B = toCam(c, b);
+  if (A[2] < NEAR && B[2] < NEAR) return;
+  if (A[2] < NEAR) { const t = (NEAR - A[2]) / (B[2] - A[2]); A = A.map((v, i) => v + (B[i] - v) * t); }
+  else if (B[2] < NEAR) { const t = (NEAR - B[2]) / (A[2] - B[2]); B = B.map((v, i) => v + (A[i] - v) * t); }
+  const p = proj(c, vp, A), q = proj(c, vp, B); g.moveTo(p[0], p[1]); g.lineTo(q[0], q[1]);
+}
+const SKY = [198, 214, 228];
+const fogc = (col, d) => { const k = 1 - Math.exp(-d / 4200); return `rgb(${col.map((v, i) => Math.round(v + (SKY[i] - v) * k))})`; };
+const shade = (col, k) => col.map(v => Math.min(255, v * k));
+
+function drawBox(g, c, vp, b, d, lw) {
+  const { x0, x1, y0, y1, z0, z1, col } = b, C = c.C, faces = [];
+  if (C[2] < z0) faces.push({ p:[[x0,y0,z0],[x1,y0,z0],[x1,y1,z0],[x0,y1,z0]], s:0.94, v:1 });
+  if (C[2] > z1) faces.push({ p:[[x1,y0,z1],[x0,y0,z1],[x0,y1,z1],[x1,y1,z1]], s:0.6, v:1 });
+  if (C[0] < x0) faces.push({ p:[[x0,y0,z1],[x0,y0,z0],[x0,y1,z0],[x0,y1,z1]], s:0.8, v:1 });
+  if (C[0] > x1) faces.push({ p:[[x1,y0,z0],[x1,y0,z1],[x1,y1,z1],[x1,y1,z0]], s:0.68, v:1 });
+  if (C[1] > y1) faces.push({ p:[[x0,y1,z0],[x1,y1,z0],[x1,y1,z1],[x0,y1,z1]], s:1.06 });
+  if (C[1] < y0) faces.push({ p:[[x0,y0,z1],[x1,y0,z1],[x1,y0,z0],[x0,y0,z0]], s:0.5 });
+  g.lineWidth = lw;
+  for (const f of faces) {
+    drawPoly(g, c, vp, f.p, fogc(shade(col, f.s), d));
+    if (b.grid && f.v && c.f * b.grid[0] / Math.max(d, 1) * vp.k > 3.5) {
+      const [p0, p1, , p3] = f.p, L = Math.hypot(p1[0] - p0[0], p1[2] - p0[2]);
+      g.beginPath();
+      for (let y = y0 + b.grid[0]; y < y1 - 0.3; y += b.grid[0]) seg(g, c, vp, [p0[0], y, p0[2]], [p1[0], y, p1[2]]);
+      const n = Math.max(1, Math.round(L / b.grid[1]));
+      for (let i = 1; i < n; i++) { const t = i / n, x = p0[0] + (p1[0] - p0[0]) * t, z = p0[2] + (p1[2] - p0[2]) * t; seg(g, c, vp, [x, y0, z], [x, p3[1], z]); }
+      g.strokeStyle = fogc(shade(col, f.s * 0.72), d); g.stroke();
+    }
+    drawPoly(g, c, vp, f.p, 'rgba(0,0,0,0)', 'rgba(0,0,0,.22)');
+  }
+}
+function drawTree(g, c, vp, t, d, lw) {
+  const top = toCam(c, [t.x, t.h, t.z]); if (top[2] < NEAR) return;
+  g.beginPath(); seg(g, c, vp, [t.x, 0, t.z], [t.x, t.h, t.z]);
+  g.strokeStyle = fogc([92, 72, 54], d); g.lineWidth = Math.max(lw, c.f * 0.35 / top[2] * vp.k); g.stroke();
+  const cc = toCam(c, [t.x, t.h + t.r * 0.7, t.z]); if (cc[2] < NEAR) return;
+  const [x, y] = proj(c, vp, cc), r = c.f * t.r / cc[2] * vp.k;
+  g.fillStyle = fogc(t.col, d); g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+  g.fillStyle = fogc(shade(t.col, 1.25), d); g.beginPath(); g.arc(x - r * 0.3, y - r * 0.3, r * 0.45, 0, Math.PI * 2); g.fill();
+}
+function chip(g, x, y, text, color, alignRight, fs) {
+  g.font = `600 ${fs}px "PingFang SC","Microsoft YaHei",sans-serif`;
+  const w = g.measureText(text).width + fs * 1.2, h = fs * 1.9, X = alignRight ? x - w : x;
+  g.fillStyle = 'rgba(8,10,14,.72)';
+  g.beginPath(); g.roundRect ? g.roundRect(X, y, w, h, h / 2) : g.rect(X, y, w, h); g.fill();
+  g.fillStyle = color; g.textBaseline = 'middle'; g.fillText(text, X + fs * 0.6, y + h / 2);
+}
+
+/* ---------- 渲染单个视口 ---------- */
+function renderView(g, vp, o, opts) {
+  const c = makeCam(o), lw = Math.max(0.7, vp.w / 1100), C = c.C;
+  g.save(); g.beginPath(); g.rect(vp.x, vp.y, vp.w, vp.h); g.clip();
+  const hy = vp.cy + (c.f * Math.tan(c.pitch * DEG) + c.shiftY) * vp.k;  // 地平线
+  let gr = g.createLinearGradient(0, hy - vp.h * 1.3, 0, hy);
+  gr.addColorStop(0, '#6c9dcf'); gr.addColorStop(1, '#dbe6ee');
+  g.fillStyle = gr; g.fillRect(vp.x, vp.y, vp.w, vp.h);
+  const bot = vp.y + vp.h;
+  let gf = fogc([148, 144, 134], 600);
+  if (bot - hy > 1) { gf = g.createLinearGradient(0, hy, 0, bot); gf.addColorStop(0, fogc([148, 144, 134], 12000)); gf.addColorStop(1, '#948f84'); }
+  drawPoly(g, c, vp, [[-40000,0,-40000],[40000,0,-40000],[40000,0,40000],[-40000,0,40000]], gf);
+  const M = scene.ridge, mz = 7000;
+  drawPoly(g, c, vp, [[M[0][0], 0, mz], ...M.map(([x, y]) => [x, y, mz]), [M[M.length - 1][0], 0, mz]], fogc([90, 110, 134], 6200));
+  const dPl = Math.hypot(C[2], C[1]);
+  drawPoly(g, c, vp, [[-75,0,-40],[75,0,-40],[75,0,40],[-75,0,40]], fogc([188, 182, 172], dPl));
+  drawPoly(g, c, vp, [[-3000,0,-58],[3000,0,-58],[3000,0,-42],[-3000,0,-42]], fogc([86, 90, 96], dPl));
+  drawPoly(g, c, vp, [[-10,0,-6000],[10,0,-6000],[10,0,-58],[-10,0,-58]], fogc([86, 90, 96], dPl));
+  for (let z = -62; z > -1500; z -= 12) if (z - 5 > C[2] + NEAR) drawPoly(g, c, vp, [[-0.15,0,z-5],[0.15,0,z-5],[0.15,0,z],[-0.15,0,z]], fogc([236, 228, 200], z - C[2]));
+  if (opts.grid) {
+    g.beginPath();
+    for (let x = -400; x <= 400; x += 10) seg(g, c, vp, [x, 0.02, -1500], [x, 0.02, 40]);
+    for (let z = -1500; z <= 40; z += 10) seg(g, c, vp, [-400, 0.02, z], [400, 0.02, z]);
+    g.strokeStyle = 'rgba(255,255,255,.09)'; g.lineWidth = lw; g.stroke();
+  }
+  const items = [];
+  for (const b of scene.boxes) {
+    const cz = toCam(c, [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2, (b.z0 + b.z1) / 2])[2];
+    if (cz < -Math.hypot(b.x1 - b.x0, b.y1 - b.y0, b.z1 - b.z0) / 2) continue;
+    const dx = Math.max(b.x0 - C[0], 0, C[0] - b.x1), dy = Math.max(b.y0 - C[1], 0, C[1] - b.y1), dz = Math.max(b.z0 - C[2], 0, C[2] - b.z1);
+    items.push({ d: Math.hypot(dx, dy, dz), b });
+  }
+  for (const t of scene.trees) items.push({ d: Math.hypot(t.x - C[0], t.h - C[1], t.z - C[2]), t });
+  items.sort((a, b) => b.d - a.d);
+  for (const it of items) it.b ? drawBox(g, c, vp, it.b, it.d, lw) : drawTree(g, c, vp, it.t, it.d, lw);
+
+  // 镜头像场圈造成的暗角（位移过大时出现）
+  const ax = vp.cx - c.shiftX * vp.k, ay = vp.cy + c.shiftY * vp.k, Rr = CIRCLE_R * vp.k;
+  gr = g.createRadialGradient(ax, ay, Rr * 0.86, ax, ay, Rr * 1.02);
+  gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(0.7, 'rgba(0,0,0,.5)'); gr.addColorStop(1, 'rgba(0,0,0,.97)');
+  g.fillStyle = gr; g.fillRect(vp.x, vp.y, vp.w, vp.h);
+
+  // 指标
+  const m = {};
+  const edge = x => { const a = toCam(c, [x, 0, 0]), b = toCam(c, [x, 90, 0]); return a[2] < NEAR || b[2] < NEAR ? null : [proj(c, vp, a), proj(c, vp, b)]; };
+  const eL = edge(-20), eR = edge(20);
+  if (eL && eR) {
+    const ang = ([p, q]) => Math.atan2(q[0] - p[0], p[1] - q[1]) / DEG;
+    m.conv = ang(eL) - ang(eR); m.heightPct = (eL[0][1] - eL[1][1]) / vp.h * 100;
+    const t0 = toCam(c, [-160, 0, 1504]), t1 = toCam(c, [-160, 300, 1504]);
+    if (t0[2] > NEAR && t1[2] > NEAR) m.towerRatio = (proj(c, vp, t0)[1] - proj(c, vp, t1)[1]) / (eL[0][1] - eL[1][1]);
+  }
+  if (opts.overlay) {
+    const fs = clamp(vp.w / 62, 11, 15);
+    if (opts.guides) {
+      g.setLineDash([5, 6]); g.strokeStyle = 'rgba(92,200,255,.45)'; g.lineWidth = 1;
+      g.beginPath(); for (let i = 1; i < 6; i++) { const x = vp.x + vp.w * i / 6; g.moveTo(x, vp.y); g.lineTo(x, bot); } g.stroke();
+      g.setLineDash([]); g.strokeStyle = 'rgba(255,100,90,.9)'; g.lineWidth = 1.5;
+      [eL, eR].forEach(e => { if (!e) return; const [p, q] = e, L = Math.hypot(q[0] - p[0], q[1] - p[1]) || 1, ux = (q[0] - p[0]) / L, uy = (q[1] - p[1]) / L;
+        g.beginPath(); g.moveTo(p[0] - ux * 5000, p[1] - uy * 5000); g.lineTo(p[0] + ux * 5000, p[1] + uy * 5000); g.stroke(); });
+    }
+    if (opts.circle) {
+      g.setLineDash([8, 6]); g.strokeStyle = 'rgba(245,181,68,.75)'; g.lineWidth = 1.5;
+      g.beginPath(); g.arc(ax, ay, Rr, 0, Math.PI * 2); g.stroke(); g.setLineDash([]);
+      g.beginPath(); g.moveTo(ax - 8, ay); g.lineTo(ax + 8, ay); g.moveTo(ax, ay - 8); g.lineTo(ax, ay + 8); g.stroke();
+      g.fillStyle = 'rgba(245,181,68,.9)'; g.font = `${fs - 1}px "Microsoft YaHei",sans-serif`; g.textBaseline = 'top';
+      g.fillText('光轴', ax + 6, ay + 4);
+    }
+  }
+  g.restore();
+  g.strokeStyle = 'rgba(255,255,255,.14)'; g.lineWidth = 1; g.strokeRect(vp.x + 0.5, vp.y + 0.5, vp.w - 1, vp.h - 1);
+  if (opts.overlay) {
+    const fs = clamp(vp.w / 62, 11, 15);
+    chip(g, vp.x + 10, vp.y + 10, opts.cap, '#f5b544', false, fs);
+    if (m.conv != null) { const ok = Math.abs(m.conv) < 0.3;
+      chip(g, vp.x + vp.w - 10, vp.y + 10, ok ? '✓ 竖线平行' : `✗ 竖线汇聚 ${Math.abs(m.conv).toFixed(1)}°`, ok ? '#5be08a' : '#ff7a6b', true, fs); }
+    chip(g, vp.x + 10, bot - fs * 1.9 - 10,
+      `${c.f.toFixed(0)}mm · 距离 ${c.D.toFixed(0)}m · 机高 ${c.camH.toFixed(1)}m · 俯仰 ${c.pitch.toFixed(1)}° · 位移 ↕${c.shiftY.toFixed(1)} ↔${c.shiftX.toFixed(1)}mm`, '#d5d9e2', false, fs - 1);
+  }
+  return m;
+}
+
+/* ---------- 视图组合 ---------- */
+function viewsFor() {
+  if (view === 'pitch') {
+    const p = Math.atan(SH.shiftY / SH.f) / DEG, y = SH.yaw + Math.atan(SH.shiftX / SH.f) / DEG;
+    return [
+      { o:{ ...SH, shiftX:0, shiftY:0, pitch:p, yaw:y }, cap:`A · 相机上仰 ${p.toFixed(1)}°（不移轴）`, col:'#ff7a6b', name:'A 上仰' },
+      { o:{ ...SH, pitch:0 }, cap:`B · 相机水平 + 镜头上移 ${SH.shiftY.toFixed(1)}mm`, col:'#5be08a', name:'B 位移' } ];
+  }
+  if (view === 'compress') {
+    const Dr = Math.max(10, SH.D * 24 / SH.f);
+    return [
+      { o:{ ...SH, f:24, D:Dr }, cap:`A · 近距离广角 24mm @ ${Dr.toFixed(0)}m`, col:'#5cc8ff', name:'A 近广角' },
+      { o:{ ...SH }, cap:`B · 远距离 ${SH.f.toFixed(0)}mm @ ${SH.D.toFixed(0)}m`, col:'#f5b544', name:'B 远长焦' } ];
+  }
+  const parts = [];
+  parts.push(Math.abs(SH.pitch) > 0.05 ? `相机${SH.pitch > 0 ? '上仰' : '俯视'} ${Math.abs(SH.pitch).toFixed(1)}°` : '相机水平');
+  if (Math.abs(SH.shiftY) > 0.05 || Math.abs(SH.shiftX) > 0.05) parts.push(`镜头位移 ↕${SH.shiftY.toFixed(1)} ↔${SH.shiftX.toFixed(1)}mm`);
+  return [{ o:{ ...SH }, cap: parts.join(' + '), col:'#f5b544', name:'当前' }];
+}
+function layout(W, H, n) {
+  const pad = 24, gap = 18, top = 18, bottom = 52, aw = (W - pad * 2 - gap * (n - 1)) / n, ah = H - top - bottom;
+  const w = Math.max(60, Math.min(aw, ah * 1.5)), h = w / 1.5, x0 = (W - (w * n + gap * (n - 1))) / 2, y0 = top + (ah - h) / 2;
+  return Array.from({ length: n }, (_, i) => { const x = x0 + i * (w + gap); return { x, y: y0, w, h, cx: x + w / 2, cy: y0 + h / 2, k: w / SW }; });
+}
+function renderAll(g, W, H) {
+  const bg = g.createRadialGradient(W / 2, H * 0.4, 0, W / 2, H * 0.4, Math.max(W, H) * 0.7);
+  bg.addColorStop(0, '#1a1e26'); bg.addColorStop(1, '#0c0e12'); g.fillStyle = bg; g.fillRect(0, 0, W, H);
+  const vs = viewsFor(), vps = layout(W, H, vs.length); lastVps = vps;
+  const opts = { overlay:true, guides:$('#shGuides').checked, circle:$('#shCircle').checked, grid:$('#shGrid').checked };
+  return { vs, ms: vs.map((v, i) => renderView(g, vps[i], v.o, { ...opts, cap: v.cap })) };
+}
+
+/* ---------- 侧视图 ---------- */
+function drawSide(vs) {
+  const cv = $('#sideView'), d = devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight; if (!w) return;
+  if (cv.width !== w * d) { cv.width = w * d; cv.height = h * d; }
+  const g = cv.getContext('2d'); g.setTransform(d, 0, 0, d, 0, 0); g.clearRect(0, 0, w, h);
+  const maxD = Math.max(...vs.map(v => v.o.D)), zmin = -maxD - 10, zmax = 45, ymax = Math.max(125, ...vs.map(v => v.o.camH + 15));
+  const s = Math.min((w - 24) / (zmax - zmin), (h - 52) / ymax), X = z => 12 + (z - zmin) * s, Y = y => h - 16 - y * s;
+  g.fillStyle = '#323844'; g.fillRect(X(-46), Y(128), 34 * s, 128 * s);
+  g.fillStyle = '#566070'; g.fillRect(X(0), Y(90), 24 * s, 90 * s); g.fillRect(X(4), Y(98), 16 * s, 8 * s); g.fillRect(X(11.5), Y(116), Math.max(1, s), 18 * s);
+  g.strokeStyle = '#3c4352'; g.lineWidth = 1; g.beginPath(); g.moveTo(0, Y(0)); g.lineTo(w, Y(0)); g.stroke();
+  vs.forEach(v => {
+    const o = v.o, P = [X(-o.D), Y(o.camH)], th = o.pitch * DEG;
+    const aT = th + Math.atan((o.shiftY + 12) / o.f), aB = th + Math.atan((o.shiftY - 12) / o.f), L = 4000;
+    const end = a => [P[0] + Math.cos(a) * L, P[1] - Math.sin(a) * L];
+    g.save(); g.beginPath(); g.rect(0, 0, w, Y(0)); g.clip();
+    g.fillStyle = v.col + '22'; g.beginPath(); g.moveTo(...P); g.lineTo(...end(aT)); g.lineTo(...end(aB)); g.closePath(); g.fill();
+    g.strokeStyle = v.col; g.lineWidth = 1; g.beginPath(); g.moveTo(...P); g.lineTo(...end(aT)); g.moveTo(...P); g.lineTo(...end(aB)); g.stroke();
+    g.setLineDash([3, 4]); g.globalAlpha = 0.6; g.beginPath(); g.moveTo(...P); g.lineTo(...end(th)); g.stroke(); g.setLineDash([]); g.globalAlpha = 1;
+    g.restore();
+    g.save(); g.translate(P[0], P[1]); g.rotate(-th);
+    g.fillStyle = '#9aa3b5'; g.fillRect(-12, -6, 12, 12);
+    g.strokeStyle = '#fff'; g.lineWidth = 2.5; g.beginPath(); g.moveTo(-12, -8); g.lineTo(-12, 8); g.stroke();
+    g.fillStyle = v.col; g.fillRect(0, -5 - o.shiftY / 12 * 4, 4, 10);
+    g.restore();
+  });
+  g.font = '11px "Microsoft YaHei",sans-serif'; g.textBaseline = 'top';
+  vs.forEach((v, i) => {
+    const lvl = Math.abs(v.o.pitch) < 0.05;
+    g.fillStyle = v.col; g.fillText(`■ ${v.name}：`, 8, 8 + i * 16);
+    g.fillStyle = lvl ? '#5be08a' : '#ff7a6b';
+    g.fillText(lvl ? '传感器 ∥ 建筑立面 → 竖线不汇聚' : `传感器倾斜 ${v.o.pitch.toFixed(1)}° → 竖线汇聚`, 74, 8 + i * 16);
+  });
+}
+
+/* ---------- 像场圈示意 ---------- */
+function drawCircleView() {
+  const cv = $('#circleView'), d = devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight; if (!w) return;
+  if (cv.width !== w * d) { cv.width = w * d; cv.height = h * d; }
+  const g = cv.getContext('2d'); g.setTransform(d, 0, 0, d, 0, 0); g.clearRect(0, 0, w, h);
+  const cx = h / 2 + 8, cy = h / 2, s = (h - 16) / (2 * CIRCLE_R);
+  g.fillStyle = 'rgba(245,181,68,.08)'; g.strokeStyle = '#f5b544'; g.lineWidth = 1.5;
+  g.beginPath(); g.arc(cx, cy, CIRCLE_R * s, 0, Math.PI * 2); g.fill(); g.stroke();
+  g.setLineDash([4, 4]); g.strokeStyle = 'rgba(255,255,255,.35)'; g.beginPath(); g.arc(cx, cy, NORMAL_R * s, 0, Math.PI * 2); g.stroke(); g.setLineDash([]);
+  const out = [[-18, -12], [18, -12], [18, 12], [-18, 12]].some(([a, b]) => Math.hypot(SH.shiftX + a, SH.shiftY + b) > CIRCLE_R);
+  const fx = cx + SH.shiftX * s, fy = cy - SH.shiftY * s;
+  g.fillStyle = out ? 'rgba(255,122,107,.18)' : 'rgba(92,200,255,.15)'; g.strokeStyle = out ? '#ff7a6b' : '#5cc8ff'; g.lineWidth = 2;
+  g.fillRect(fx - 18 * s, fy - 12 * s, 36 * s, 24 * s); g.strokeRect(fx - 18 * s, fy - 12 * s, 36 * s, 24 * s);
+  g.strokeStyle = 'rgba(255,255,255,.5)'; g.lineWidth = 1; g.beginPath(); g.moveTo(cx - 5, cy); g.lineTo(cx + 5, cy); g.moveTo(cx, cy - 5); g.lineTo(cx, cy + 5); g.stroke();
+  const tx = cx + CIRCLE_R * s + 14; g.font = '11px "Microsoft YaHei",sans-serif'; g.textBaseline = 'top';
+  const big = Math.max(Math.abs(SH.shiftX), Math.abs(SH.shiftY)) > 12;
+  [['取景框在像场中的位置', '#c6cbd6'], ['实线：移轴镜头 Ø67mm', '#f5b544'], ['虚线：普通镜头 Ø43mm', '#8a92a6'],
+   [`↕ ${SH.shiftY.toFixed(1)}  ↔ ${SH.shiftX.toFixed(1)} mm`, '#e7e9ef'],
+   out ? ['⚠ 超出像场：角落暗角', '#ff7a6b'] : big ? ['⚠ 超出常见 ±12mm 行程', '#f5b544'] : ['✓ 位于像场之内', '#5be08a']]
+    .forEach(([t, c], i) => { g.fillStyle = c; g.fillText(t, tx, 14 + i * 24); });
+}
+
+/* ---------- 统计 ---------- */
+function updateStats(vs, ms) {
+  const hf = 2 * Math.atan(18 / SH.f) / DEG, vf = 2 * Math.atan(12 / SH.f) / DEG, f1 = v => v == null ? '—' : v.toFixed(2);
+  const conv = m => m.conv == null ? '—' : Math.abs(m.conv) < 0.3 ? '<b class="ok">平行</b>' : `<b class="bad">${Math.abs(m.conv).toFixed(1)}°</b>`;
+  let html = `视角：水平 ${hf.toFixed(1)}° × 垂直 ${vf.toFixed(1)}°<br>`;
+  if (view === 'single') html += `竖线：${conv(ms[0])} ｜ 主楼占画面高 ${ms[0].heightPct ? ms[0].heightPct.toFixed(0) + '%' : '—'}<br>远景电视塔 / 主楼 视高比：<b style="color:#e7e9ef">${f1(ms[0].towerRatio)}</b>`;
+  if (view === 'pitch') html += `竖线汇聚：A ${conv(ms[0])} ｜ B ${conv(ms[1])}`;
+  if (view === 'compress') html += `远景电视塔 / 主楼 视高比：A <b style="color:#5cc8ff">${f1(ms[0].towerRatio)}</b> → B <b style="color:#f5b544">${f1(ms[1].towerRatio)}</b><br>比值越大 = 背景越“贴近”主体（透视压缩）`;
+  $('#shStats').innerHTML = html;
+  $('#shViewNote').innerHTML = {
+    single: '拖动画面可直接移动镜头；切换到对比视图可并排观察差异。',
+    pitch: Math.abs(SH.shiftY) < 0.1 ? '⚠ 请先设置“垂直位移”，A 会自动按 arctan(位移/焦距) 上仰到相同取景中心。'
+      : 'A、B 取景中心相同（上仰角 = arctan(位移 ÷ 焦距)）。A 传感器倾斜，竖线向上汇聚；B 相机保持水平只移动镜头，竖线保持竖直。',
+    compress: '两画面主体大小相同（焦距 ÷ 距离 相同）。对比背景电视塔、远山与路灯间距：B 退远后背景被“拉近放大”，前后景距离感被压缩。<br>建议勾选“锁定主体大小”后拖动距离滑块。',
+  }[view];
+}
+
+/* ---------- 主循环 ---------- */
+const cvs = $('#shiftCanvas'), ctx = cvs.getContext('2d');
+let pending = false;
+function schedule() { if (!pending) { pending = true; requestAnimationFrame(draw); } }
+function draw() {
+  pending = false;
+  if (document.body.dataset.tab !== 'shift') return;
+  const d = devicePixelRatio || 1, W = cvs.clientWidth, H = cvs.clientHeight; if (!W) return;
+  if (cvs.width !== Math.round(W * d) || cvs.height !== Math.round(H * d)) { cvs.width = Math.round(W * d); cvs.height = Math.round(H * d); }
+  ctx.setTransform(d, 0, 0, d, 0, 0);
+  const { vs, ms } = renderAll(ctx, W, H);
+  drawSide(vs); drawCircleView(); updateStats(vs, ms); syncUI();
+}
+new ResizeObserver(schedule).observe($('#stage'));
+
+/* ---------- 控件 ---------- */
+function setD(v) { v = clamp(v, 10, 800); if (lockRatio) { const f = clamp(lockRatio * v, 14, 600); v = f / lockRatio; SH.f = f; } SH.D = v; }
+function setF(v) { v = clamp(v, 14, 600); if (lockRatio) { const D = clamp(v / lockRatio, 10, 800); v = D * lockRatio; SH.D = D; } SH.f = v; }
+const SSPEC = {
+  shift: [
+    { k:'shiftY', label:'垂直位移（上 + / 下 −）', min:-15, max:15, step:0.1, fmt:v => (v > 0 ? '+' : '') + v.toFixed(1) + ' mm' },
+    { k:'shiftX', label:'水平位移（右 + / 左 −）', min:-15, max:15, step:0.1, fmt:v => (v > 0 ? '+' : '') + v.toFixed(1) + ' mm' } ],
+  pose: [
+    { k:'pitch', label:'相机俯仰（上仰 + / 俯视 −）', min:-20, max:60, step:0.1, fmt:v => v.toFixed(1) + '°' },
+    { k:'yaw', label:'相机水平转动', min:-40, max:40, step:0.1, fmt:v => v.toFixed(1) + '°' },
+    { k:'camH', label:'相机高度', min:1.2, max:80, log:true, fmt:v => v.toFixed(1) + ' m' },
+    { k:'camX', label:'相机横向位置', min:-60, max:60, step:0.5, fmt:v => v.toFixed(1) + ' m' } ],
+  lens: [
+    { k:'D', label:'拍摄距离（到建筑立面）', min:10, max:800, log:true, fmt:v => v.toFixed(0) + ' m', set:setD },
+    { k:'f', label:'焦距（全画幅等效）', min:14, max:600, log:true, fmt:v => v.toFixed(0) + ' mm', set:setF } ],
+};
+const sInputs = {};
+for (const grp in SSPEC) SSPEC[grp].forEach(sp => {
+  const div = document.createElement('div'); div.className = 'ctl';
+  div.innerHTML = `<div class="row" title="双击恢复默认值"><span>${sp.label}</span><span class="val"></span></div>
+    <input type="range" min="${sp.log ? 0 : sp.min}" max="${sp.log ? 1000 : sp.max}" step="${sp.log ? 1 : sp.step}">`;
+  const inp = div.querySelector('input');
+  const toVal = t => sp.log ? sp.min * Math.pow(sp.max / sp.min, t / 1000) : t;
+  inp.addEventListener('input', () => { stopDolly(); const v = toVal(parseFloat(inp.value)); sp.set ? sp.set(v) : (SH[sp.k] = v); if (sp.k === 'shiftY' && Math.abs(v) > 0.5) lastShift = v; schedule(); });
+  div.querySelector('.row').addEventListener('dblclick', () => { sp.set ? sp.set(SH_DEF[sp.k]) : (SH[sp.k] = SH_DEF[sp.k]); schedule(); });
+  sInputs[sp.k] = { inp, val: div.querySelector('.val'), sp };
+  $('#sg-' + grp).appendChild(div);
+});
+function syncUI() {
+  for (const k in sInputs) {
+    const { inp, val, sp } = sInputs[k], v = SH[k];
+    const t = sp.log ? 1000 * Math.log(v / sp.min) / Math.log(sp.max / sp.min) : v;
+    if (document.activeElement !== inp) inp.value = t;
+    inp.style.setProperty('--p', ((t - inp.min) / (inp.max - inp.min) * 100) + '%');
+    val.textContent = sp.fmt(v);
+    val.style.color = (k === 'shiftX' || k === 'shiftY') && Math.abs(v) > 12 ? '#ff7a6b' : '';
+  }
+}
+document.querySelectorAll('#shViewSeg button').forEach(b => b.addEventListener('click', () => {
+  view = b.dataset.v;
+  document.querySelectorAll('#shViewSeg button').forEach(x => x.classList.toggle('on', x === b));
+  if (view === 'compress' && SH.f < 50) { $('#shLock').checked = true; lockRatio = SH.f / SH.D; setD(SH.D * 5); }
+  schedule();
+}));
+document.querySelectorAll('[data-q]').forEach(b => b.addEventListener('click', () => {
+  stopDolly();
+  const s = Math.abs(SH.shiftY) > 0.5 ? SH.shiftY : lastShift;
+  if (b.dataset.q === 'level') Object.assign(SH, { shiftX:0, shiftY:0, pitch:0 });
+  if (b.dataset.q === 'pitch') Object.assign(SH, { shiftX:0, shiftY:0, pitch: Math.atan(s / SH.f) / DEG });
+  if (b.dataset.q === 'shift') Object.assign(SH, { pitch:0, shiftY: s });
+  schedule();
+}));
+$('#shLock').addEventListener('change', e => { lockRatio = e.target.checked ? SH.f / SH.D : null; });
+['shGuides', 'shCircle', 'shGrid'].forEach(id => $('#' + id).addEventListener('change', schedule));
+$('#shReset').onclick = () => { stopDolly(); Object.assign(SH, SH_DEF); lockRatio = null; $('#shLock').checked = false; schedule(); };
+
+/* 希区柯克变焦演示 */
+function stopDolly() { if (dolly) { cancelAnimationFrame(dolly.raf); dolly = null; $('#shDolly').textContent = '▶ 演示：后退 + 换长焦（希区柯克变焦）'; } }
+$('#shDolly').onclick = () => {
+  if (dolly) return stopDolly();
+  $('#shLock').checked = true; lockRatio = lockRatio || SH.f / SH.D;
+  const D0 = Math.max(10, 14 / lockRatio), D1 = Math.min(800, 600 / lockRatio), T = 7000, t0 = performance.now();
+  $('#shDolly').textContent = '■ 停止演示';
+  dolly = {};
+  const step = now => {
+    const u = Math.min(1, (now - t0) / T), e = u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
+    setD(D0 * Math.pow(D1 / D0, e)); schedule();
+    if (u < 1 && dolly) dolly.raf = requestAnimationFrame(step); else stopDolly();
+  };
+  dolly.raf = requestAnimationFrame(step);
+};
+
+/* 画布交互：拖动 = 移动镜头；滚轮 = 变焦；Shift+滚轮 = 前后移动 */
+let drag = null;
+cvs.addEventListener('pointerdown', e => { stopDolly(); cvs.setPointerCapture(e.pointerId); drag = { x: e.clientX, y: e.clientY, sx: SH.shiftX, sy: SH.shiftY }; });
+cvs.addEventListener('pointermove', e => {
+  if (!drag || !lastVps[0]) return;
+  const k = lastVps[0].k;
+  SH.shiftY = clamp(drag.sy + (e.clientY - drag.y) / k, -15, 15);
+  SH.shiftX = clamp(drag.sx - (e.clientX - drag.x) / k, -15, 15);
+  if (Math.abs(SH.shiftY) > 0.5) lastShift = SH.shiftY;
+  schedule();
+});
+cvs.addEventListener('pointerup', () => drag = null);
+cvs.addEventListener('wheel', e => {
+  e.preventDefault(); stopDolly();
+  const k = Math.exp(-Math.sign(e.deltaY) * 0.06);
+  e.shiftKey ? setD(SH.D / k) : setF(SH.f * k);
+  schedule();
+}, { passive:false });
+
+/* ---------- 导出 / 发送到微缩虚化 ---------- */
+$('#shExport').onclick = () => {
+  const W = cvs.clientWidth, H = cvs.clientHeight, sc = 2, c = document.createElement('canvas');
+  c.width = W * sc; c.height = H * sc; const g = c.getContext('2d'); g.setTransform(sc, 0, 0, sc, 0, 0);
+  renderAll(g, W, H); schedule();
+  c.toBlob(b => { const a = document.createElement('a'); a.href = URL.createObjectURL(b);
+    a.download = `移轴透视_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.png`; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000); }, 'image/png');
+};
+$('#shToTilt').onclick = () => {
+  const W = 2400, H = 1600, c = document.createElement('canvas'); c.width = W; c.height = H;
+  renderView(c.getContext('2d'), { x:0, y:0, w:W, h:H, cx:W / 2, cy:H / 2, k:W / SW }, { ...SH }, { overlay:false, grid:$('#shGrid').checked });
+  setTab('tilt'); window.TiltApp && window.TiltApp.setSource(c);
+};
+
+/* ---------- 标签页 ---------- */
+function setTab(t) {
+  document.body.dataset.tab = t;
+  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
+  if (t === 'tilt') { stopDolly(); window.TiltApp && window.TiltApp.refresh(); } else schedule();
+}
+document.querySelectorAll('#tabs button').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
+syncUI();
+schedule();
+})();
+</script>
+</body>
+</html>
